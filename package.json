@@ -1,0 +1,83 @@
+{
+  "name": "be-ainovel",
+  "version": "0.1.0",
+  "description": "AINovel backend — coin economy, offerwall/postback gateway, fraud engine, redemption fulfillment, drama module",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/worker.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "admin:dev": "vite --config admin/vite.config.ts",
+    "admin:typecheck": "tsc -p admin/tsconfig.json --noEmit",
+    "admin:build": "tsc -p admin/tsconfig.json --noEmit && vite build --config admin/vite.config.ts",
+    "admin:set-password": "node dist/cli/set-admin-password.js",
+    "start": "node dist/server.js",
+    "start:worker": "node dist/worker.js",
+    "migrate": "node-pg-migrate --envPath .env --migrations-dir src/db/migrations",
+    "migrate:up": "node-pg-migrate up --envPath .env --migrations-dir src/db/migrations",
+    "migrate:up:prod": "node-pg-migrate up --migrations-dir src/db/migrations",
+    "migrate:down": "node-pg-migrate down --envPath .env --migrations-dir src/db/migrations",
+    "migrate:down:prod": "node-pg-migrate down --migrations-dir src/db/migrations",
+    "migrate:create": "node-pg-migrate create --envPath .env --migrations-dir src/db/migrations",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "prepare": "husky || true"
+  },
+  "dependencies": {
+    "@fastify/jwt": "^9.0.1",
+    "@sinclair/typebox": "^0.33.17",
+    "argon2": "^0.44.0",
+    "bullmq": "^5.28.1",
+    "dotenv": "^16.4.5",
+    "fastify": "^5.1.0",
+    "geoip-lite": "^2.0.3",
+    "google-auth-library": "^10.9.1",
+    "ioredis": "^5.4.1",
+    "ipaddr.js": "^2.4.0",
+    "kysely": "^0.27.4",
+    "node-pg-migrate": "^7.9.1",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "uuidv7": "^1.0.2"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "@eslint/js": "^9.14.0",
+    "@types/geoip-lite": "^1.4.4",
+    "@types/node": "^22.9.0",
+    "@types/pg": "^8.11.10",
+    "@vitest/coverage-v8": "^2.1.4",
+    "eslint": "^9.14.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-security": "^3.0.1",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.3.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.13.0",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.4"
+  },
+  "lint-staged": {
+    "*.{ts,js}": [
+      "eslint --fix --max-warnings=0",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}

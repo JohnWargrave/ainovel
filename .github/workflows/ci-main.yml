@@ -1,0 +1,143 @@
+name: Backend CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify backend
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ainovel
+          POSTGRES_PASSWORD: ainovel
+          POSTGRES_DB: ainovel
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ainovel -d ainovel"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://ainovel:ainovel@localhost:5432/ainovel
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci-only-access-secret
+      JWT_REFRESH_SECRET: ci-only-refresh-secret
+      DELIVERY_CODE_ENC_KEY: ci-only-32-bytes-minimum-length
+      ADMIN_API_KEY: ci-only-admin-key
+      ADMIN_CSRF_TOKEN: ci-only-csrf-token
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Migrate test database
+        run: pnpm exec node-pg-migrate up --migrations-dir src/db/migrations
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build admin CMS
+        run: pnpm admin:build
+
+      - name: Build backend
+        run: pnpm build
+
+  deploy:
+    name: Deploy backend to production host
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_SERVER_USER: ${{ vars.DEPLOY_MAIN_SERVER_USER }}
+      DEPLOY_SERVER_ADDR: ${{ vars.DEPLOY_MAIN_SERVER_ADDR }}
+      PROJECT_LOCATION: ${{ vars.PROJECT_LOCATION_MAIN }}
+      PROD_ENV_FILE: .env.production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+
+      - name: Configure known hosts
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' '${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}' > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Prepare remote directory
+        run: |
+          ssh "$DEPLOY_SERVER_USER@$DEPLOY_SERVER_ADDR" "mkdir -p '$PROJECT_LOCATION'"
+
+      - name: Package backend source
+        run: |
+          git archive --format=tar.gz --output backend-source.tar.gz HEAD
+
+      - name: Transfer backend source
+        run: |
+          scp \
+            backend-source.tar.gz \
+            "$DEPLOY_SERVER_USER@$DEPLOY_SERVER_ADDR:$PROJECT_LOCATION/"
+          rm -f backend-source.tar.gz
+
+      - name: Restart production services
+        run: |
+          ssh "$DEPLOY_SERVER_USER@$DEPLOY_SERVER_ADDR" << EOF
+            set -e
+            cd '$PROJECT_LOCATION'
+            find . -maxdepth 1 -type f -name 'backend-*.tar.gz' ! -name 'backend-source.tar.gz' -delete
+            # Replace archived directories so files deleted by this revision cannot linger on the
+            # deployment host and get copied into the Docker build context.
+            tar --extract --gzip --file backend-source.tar.gz --recursive-unlink
+            rm -f backend-source.tar.gz
+            if [ ! -f '$PROD_ENV_FILE' ] && [ -f '.env' ]; then
+              cp .env '$PROD_ENV_FILE'
+            fi
+            if [ ! -f '$PROD_ENV_FILE' ]; then
+              echo "Missing $PROD_ENV_FILE on deploy host. Create it with production values before deploying."
+              exit 1
+            fi
+            docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml up -d postgres redis
+            docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml build migrate backend-api backend-worker
+            docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml run --rm -T migrate </dev/null
+            docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml up -d --force-recreate --remove-orphans backend-api backend-worker
+            docker image prune -f >/dev/null 2>&1 || true
+          EOF

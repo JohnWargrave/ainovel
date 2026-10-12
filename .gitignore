@@ -1,0 +1,11 @@
+node_modules
+.pnpm-store/
+dist
+coverage
+.env
+.env.local
+.env.production
+*.log
+.DS_Store
+pgdata/
+deploy/nginx/referral-links/generated/

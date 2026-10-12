@@ -1,0 +1,104 @@
+x-backend-env: &backend-env
+  env_file:
+    - .env.production
+  environment:
+    NODE_ENV: production
+    PORT: ${PORT:-3000}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+x-backend-build: &backend-build
+  context: .
+  dockerfile: Dockerfile
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redisdata_prod:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    <<: *backend-env
+    restart: 'no'
+    build:
+      <<: *backend-build
+      target: api
+    image: be-ainovel-migrate:latest
+    command:
+      [
+        'node',
+        'node_modules/node-pg-migrate/bin/node-pg-migrate.js',
+        'up',
+        '--migrations-dir',
+        'src/db/migrations',
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend-api:
+    <<: *backend-env
+    restart: unless-stopped
+    build:
+      <<: *backend-build
+      target: api
+    image: be-ainovel-api:latest
+    ports:
+      - '${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-3000}:${PORT:-3000}'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "Promise.all(['/health', '/cms'].map((path) => fetch('http://127.0.0.1:' + (process.env.PORT ?? '3000') + path))).then((responses) => { if (responses.some((r) => !r.ok)) process.exit(1) }).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  backend-worker:
+    <<: *backend-env
+    restart: unless-stopped
+    build:
+      <<: *backend-build
+      target: worker
+    image: be-ainovel-worker:latest
+    command: ['node', 'dist/worker.js']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata_prod:
+  redisdata_prod:

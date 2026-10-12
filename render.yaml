@@ -1,0 +1,68 @@
+services:
+  - type: web
+    name: ainovel-api-staging
+    runtime: node
+    plan: free
+    buildCommand: pnpm install --frozen-lockfile && pnpm admin:build && pnpm build && pnpm migrate:up:prod
+    startCommand: NODE_ENV=production pnpm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22.20.0
+      - key: NODE_ENV
+        value: development
+      - key: LOG_LEVEL
+        value: info
+      - key: MIN_SUPPORTED_APP_VERSION
+        value: 1.0.0
+      - key: REFERRAL_SHARE_BASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: DELIVERY_CODE_ENC_KEY
+        sync: false
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: ADMIN_CSRF_TOKEN
+        sync: false
+      - key: CMS_SESSION_SECRET
+        sync: false
+      - key: ENABLE_LEGACY_ADMIN_API_KEY
+        value: false
+      - key: ENABLE_TEST_COIN_API
+        value: false
+      - key: TRUST_PROXY
+        sync: false
+      - key: TAPJOY_POSTBACK_SECRET
+        sync: false
+      - key: PUBSCALE_POSTBACK_SECRET
+        sync: false
+      - key: TAPJOY_PLACEMENT
+        sync: false
+      - key: PUBSCALE_PLACEMENT
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: FACEBOOK_APP_ID
+        sync: false
+      - key: FACEBOOK_APP_SECRET
+        sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_EMAIL_API_TOKEN
+        sync: false
+      - key: AUTH_EMAIL_FROM
+        sync: false
+      - key: AUTH_EMAIL_FROM_NAME
+        value: AINovel
+      - key: AUTH_EMAIL_VERIFY_URL
+        sync: false
+      - key: AUTH_PASSWORD_RESET_URL
+        sync: false

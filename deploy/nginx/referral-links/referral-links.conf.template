@@ -1,0 +1,35 @@
+# Render with render.sh. TLS can terminate here or at the load balancer in front of Nginx.
+server {
+    listen 80;
+    server_name ${REFERRAL_LINK_HOST};
+
+    location = /.well-known/assetlinks.json {
+        alias "${REFERRAL_LINK_ASSET_DIR}/assetlinks.json";
+        default_type application/json;
+        add_header Cache-Control "public, max-age=3600" always;
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+
+    location ~ "^/r/(?<referral_code>HP-[A-HJ-NP-Z2-9]{6})/?$" {
+        if ($request_method !~ ^(GET|HEAD)$) {
+            return 405;
+        }
+        add_header Cache-Control "no-store" always;
+        return 302 https://play.google.com/store/apps/details?id=${GOOGLE_PLAY_PACKAGE_NAME}&referrer=code%3D$referral_code;
+    }
+
+    # Compatibility for links shared before /r/{code} became canonical.
+    location = /r {
+        if ($request_method !~ ^(GET|HEAD)$) {
+            return 405;
+        }
+        if ($arg_code ~ "^HP-[A-HJ-NP-Z2-9]{6}$") {
+            return 308 https://${REFERRAL_LINK_HOST}/r/$arg_code;
+        }
+        return 404;
+    }
+
+    location / {
+        return 404;
+    }
+}
