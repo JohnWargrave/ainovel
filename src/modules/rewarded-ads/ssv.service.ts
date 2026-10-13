@@ -2,6 +2,7 @@ import { uuidv7 } from 'uuidv7';
 import type { Queue } from 'bullmq';
 import { db } from '../../db/index.js';
 import { AppError } from '../../lib/errors.js';
+import { admobAllowedAdUnits } from '../../config/env.js';
 import { COIN_PER_USD } from '../../lib/economy.js';
 import { creditInTransaction } from '../wallet-ledger/ledger.service.js';
 import { recordMint, recordRevenue } from '../wallet-ledger/economy-counters.js';
@@ -93,6 +94,18 @@ export async function processAdmobSsv(input: SsvInput, deps: SsvDeps): Promise<v
     if (!customData || !transactionId) {
       await setVerdict(logId, 'error');
       return;
+    }
+
+    // Google signs SSV callbacks for every AdMob publisher with the same keys, so a valid signature
+    // only proves "some AdMob app served an ad". The ad unit pins it to ours. 200, not 403: Google
+    // must not retry a callback that will never be acceptable.
+    const allowedAdUnits = admobAllowedAdUnits();
+    if (allowedAdUnits.length > 0) {
+      const adUnit = input.query['ad_unit'] ?? '';
+      if (!allowedAdUnits.includes(adUnit.slice(adUnit.lastIndexOf('/') + 1))) {
+        await setVerdict(logId, 'bad_ad_unit');
+        return;
+      }
     }
 
     const intentSnapshot = await db

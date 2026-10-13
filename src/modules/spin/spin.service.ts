@@ -357,7 +357,9 @@ async function assertSpinAdIntent(
     intent.user_id !== userId ||
     intent.status !== 'consumed' ||
     intent.spin_history_id !== null ||
-    (intent.placement !== null && intent.placement !== 'luckyspin')
+    // Strictly luckyspin: a NULL-placement (legacy) intent is paid in coin by the SSV callback, so
+    // letting it also fund a spin would reward one ad twice.
+    intent.placement !== 'luckyspin'
   ) {
     throw adNotVerified();
   }

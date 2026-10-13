@@ -286,6 +286,9 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthDeps): void {
     },
     async (request, reply) => {
       if (!request.authUser) throw new AppError('UNAUTHORIZED', 'Missing bearer token', 401);
+      // argon2 verify per attempt: bounds both brute-forcing the current password with a stolen
+      // access token and using the endpoint as a CPU/memory sink.
+      await checkSubjectRateLimit('auth-password-change', request.authUser.sub, 3600, 10);
       await changePassword(
         request.authUser.sub,
         request.body.current_password,

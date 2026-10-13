@@ -12,6 +12,7 @@ import {
 } from './ip-allowlist-refresh.js';
 import { createPostbackFraudHookWorker } from './postback-fraud-hook.js';
 import { createReferralCreditWorker } from './referral-credit.js';
+import { createNovelImportWorker } from './novel-import.js';
 import {
   createCatalogCrawlerQueue,
   createCatalogCrawlerWorker,
@@ -40,6 +41,9 @@ export async function registerJobs(logger: pino.Logger): Promise<Worker[]> {
   // repeat schedule, just the consumer.
   const referralCreditWorker = createReferralCreditWorker(logger);
 
+  // Event-driven (enqueued by the CMS import upload) — parses uploaded novel files.
+  const novelImportWorker = createNovelImportWorker(logger);
+
   const catalogCrawlerQueue = createCatalogCrawlerQueue();
   await scheduleCatalogCrawlerRepeat(catalogCrawlerQueue);
   // Default source is noopCatalogSource until SeaGM ToS/reseller channel is confirmed — see
@@ -55,6 +59,7 @@ export async function registerJobs(logger: pino.Logger): Promise<Worker[]> {
     ipAllowlistRefreshWorker,
     postbackFraudHookWorker,
     referralCreditWorker,
+    novelImportWorker,
     catalogCrawlerWorker,
     economyBackingAlertWorker,
   ];

@@ -22,6 +22,7 @@ const PlacementsSchema = Type.Object({
   checkin: Type.Optional(PlacementSettingsSchema),
   earncoin: Type.Optional(PlacementSettingsSchema),
   luckyspin: Type.Optional(PlacementSettingsSchema),
+  chapter_unlock: Type.Optional(PlacementSettingsSchema),
 });
 
 export const RewardedAdsRegionSettingsSchema = Type.Object({

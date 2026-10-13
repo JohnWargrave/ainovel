@@ -1,3 +1,7 @@
+# Fixed project name: container/volume/network names stay be-ainovel-* whatever directory this is
+# deployed from, so it can never collide with another stack on the same host.
+name: be-ainovel
+
 x-backend-env: &backend-env
   env_file:
     - .env.production

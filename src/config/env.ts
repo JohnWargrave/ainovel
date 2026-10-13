@@ -40,8 +40,20 @@ const EnvSchema = Type.Object({
   AUTH_EMAIL_FROM_NAME: Type.Optional(Type.String()),
   AUTH_EMAIL_VERIFY_URL: Type.Optional(Type.String()),
   AUTH_PASSWORD_RESET_URL: Type.Optional(Type.String()),
-  DRAMA_PLAYBACK_SECRET: Type.Optional(Type.String()),
-  DRAMA_PLAYBACK_BASE_URL: Type.Optional(Type.String()),
+  // Comma-separated AdMob ad unit ids (either the full `ca-app-pub-…/123` form or just `123`) whose
+  // SSV callbacks may credit. Google signs SSV for every publisher with the same keys, so without
+  // this list any AdMob app can aim its callback at us. Read through `admobAllowedAdUnits()`.
+  ADMOB_ALLOWED_AD_UNITS: Type.Optional(Type.String()),
+  // S3-compatible object storage (AWS S3, Cloudflare R2, MinIO) for novel covers and import files.
+  // Optional so dev/test can boot without it; upload endpoints fail with 503 until configured.
+  S3_ENDPOINT: Type.Optional(Type.String()),
+  S3_REGION: Type.Optional(Type.String()),
+  S3_BUCKET: Type.Optional(Type.String()),
+  S3_ACCESS_KEY_ID: Type.Optional(Type.String()),
+  S3_SECRET_ACCESS_KEY: Type.Optional(Type.String()),
+  S3_FORCE_PATH_STYLE: Type.Boolean({ default: false }),
+  // Public (CDN) base URL objects are served from, e.g. https://cdn.example.com.
+  S3_PUBLIC_BASE_URL: Type.Optional(Type.String()),
   // Base of the invite link GET /referral hands the app to share (the code is appended as /{code}).
   // Optional: without a registered deeplink/landing page there is no correct value, and the field is
   // omitted from the response rather than emitting a link that goes nowhere.
@@ -89,8 +101,14 @@ export function loadEnv(source: NodeJS.ProcessEnv): Env {
     AUTH_EMAIL_FROM_NAME: source['AUTH_EMAIL_FROM_NAME'],
     AUTH_EMAIL_VERIFY_URL: source['AUTH_EMAIL_VERIFY_URL'],
     AUTH_PASSWORD_RESET_URL: source['AUTH_PASSWORD_RESET_URL'],
-    DRAMA_PLAYBACK_SECRET: source['DRAMA_PLAYBACK_SECRET'],
-    DRAMA_PLAYBACK_BASE_URL: source['DRAMA_PLAYBACK_BASE_URL'],
+    ADMOB_ALLOWED_AD_UNITS: source['ADMOB_ALLOWED_AD_UNITS'],
+    S3_ENDPOINT: source['S3_ENDPOINT'],
+    S3_REGION: source['S3_REGION'],
+    S3_BUCKET: source['S3_BUCKET'],
+    S3_ACCESS_KEY_ID: source['S3_ACCESS_KEY_ID'],
+    S3_SECRET_ACCESS_KEY: source['S3_SECRET_ACCESS_KEY'],
+    S3_FORCE_PATH_STYLE: source['S3_FORCE_PATH_STYLE'] === 'true',
+    S3_PUBLIC_BASE_URL: source['S3_PUBLIC_BASE_URL'],
     REFERRAL_SHARE_BASE_URL: source['REFERRAL_SHARE_BASE_URL'],
   };
 
@@ -105,7 +123,35 @@ export function loadEnv(source: NodeJS.ProcessEnv): Env {
     throw new Error(`Invalid environment configuration:\n${errors}`);
   }
 
+  if (cast.NODE_ENV === 'production') {
+    assertProductionSecrets(cast);
+  }
+
   return cast;
+}
+
+const MIN_PRODUCTION_SECRET_LENGTH = 32;
+
+// Dev/test keep accepting short placeholder secrets; production refuses to boot with secrets that
+// are guessable or shared between the access and refresh token keys.
+function assertProductionSecrets(config: Env): void {
+  const problems: string[] = [];
+  const secrets = {
+    JWT_ACCESS_SECRET: config.JWT_ACCESS_SECRET,
+    JWT_REFRESH_SECRET: config.JWT_REFRESH_SECRET,
+    ADMIN_API_KEY: config.ADMIN_API_KEY,
+  };
+  for (const [name, value] of Object.entries(secrets)) {
+    if (value.length < MIN_PRODUCTION_SECRET_LENGTH) {
+      problems.push(`  - /${name}: must be at least ${String(MIN_PRODUCTION_SECRET_LENGTH)} characters`);
+    }
+  }
+  if (config.JWT_ACCESS_SECRET === config.JWT_REFRESH_SECRET) {
+    problems.push('  - /JWT_REFRESH_SECRET: must differ from JWT_ACCESS_SECRET');
+  }
+  if (problems.length > 0) {
+    throw new Error(`Invalid environment configuration:\n${problems.join('\n')}`);
+  }
 }
 
 export const env: Env = loadEnv(process.env);
@@ -117,4 +163,14 @@ export function googleClientIds(): string[] {
     .split(',')
     .map((id) => id.trim())
     .filter((id) => id.length > 0);
+}
+
+// Empty array means "not configured" — the SSV handler then accepts any ad unit (and logs a warning
+// at boot), which keeps existing deployments working until the list is filled in.
+export function admobAllowedAdUnits(): string[] {
+  return (env.ADMOB_ALLOWED_AD_UNITS ?? '')
+    .split(',')
+    .map((unit) => unit.trim())
+    .filter((unit) => unit.length > 0)
+    .map((unit) => unit.slice(unit.lastIndexOf('/') + 1));
 }

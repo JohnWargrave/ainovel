@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { argon2id, hash as hashPassword, verify as verifyPassword } from 'argon2';
 import { uuidv7 } from 'uuidv7';
+import ipaddr from 'ipaddr.js';
 import type { JWT } from '@fastify/jwt';
 import type { Transaction } from 'kysely';
 import { db } from '../../db/index.js';
@@ -529,6 +530,20 @@ async function tryRecoverGuest(
   };
 }
 
+const GUEST_CREATE_WINDOW_S = 60 * 60;
+const GUEST_CREATE_PER_NETWORK_MAX = 60;
+const GUEST_CREATE_GAID_WINDOW_S = 24 * 60 * 60;
+const GUEST_CREATE_PER_GAID_MAX = 3;
+
+function networkKey(ip: string): string {
+  if (!ipaddr.isValid(ip)) return ip;
+  const parsed = ipaddr.process(ip);
+  if (parsed.kind() === 'ipv4') {
+    return `${parsed.toByteArray().slice(0, 3).join('.')}.0/24`;
+  }
+  return `${(parsed as ipaddr.IPv6).parts.slice(0, 4).map((part) => part.toString(16)).join(':')}::/64`;
+}
+
 export async function guestSignup(
   deps: AuthDeps,
   device: DeviceInput,
@@ -554,6 +569,25 @@ export async function guestSignup(
     context,
   );
   if (recovered) return recovered;
+
+  // New-account budgets, separate from the per-IP request limit on the route: X-Device-Id is
+  // client-generated, so without these a script can mint a fresh account (and welcome bonus) per
+  // request. Keyed on the /24 (IPv4) or /64 (IPv6) so rotating addresses inside one network does
+  // not reset the budget.
+  await checkSubjectRateLimit(
+    'auth-guest-create-net',
+    networkKey(context.ip),
+    GUEST_CREATE_WINDOW_S,
+    GUEST_CREATE_PER_NETWORK_MAX,
+  );
+  if (gaid) {
+    await checkSubjectRateLimit(
+      'auth-guest-create-gaid',
+      gaid,
+      GUEST_CREATE_GAID_WINDOW_S,
+      GUEST_CREATE_PER_GAID_MAX,
+    );
+  }
 
   const result = await createUserWithDevice(
     deps,

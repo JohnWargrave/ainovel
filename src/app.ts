@@ -21,8 +21,8 @@ import { registerRedemptionAdminRoutes } from './modules/redemption/admin-routes
 import { registerConfigRoutes } from './modules/config/routes.js';
 import { registerConfigAdminRoutes } from './modules/config/admin-routes.js';
 import { registerCoinRewardSettingsAdminRoutes } from './modules/config/coin-reward-settings-admin-routes.js';
-import { registerDramaRoutes } from './modules/drama/routes.js';
-import { registerDramaAdminRoutes } from './modules/drama/admin-routes.js';
+import { registerNovelRoutes } from './modules/novel/routes.js';
+import { registerNovelAdminRoutes } from './modules/novel/admin-routes.js';
 import { registerInboxRoutes } from './modules/inbox/routes.js';
 import { registerFraudAdminRoutes } from './modules/fraud/admin-routes.js';
 import { registerAdminUsersRoutes } from './modules/admin/users-routes.js';
@@ -222,8 +222,8 @@ export async function buildApp(overrides?: BuildAppOverrides): Promise<FastifyIn
     registerCoinRewardSettingsAdminRoutes(target);
     registerDirectCoinRoutes(target, { accessJwt: authDeps.accessJwt });
     registerDirectCoinAdminRoutes(target);
-    registerDramaRoutes(target, { accessJwt: authDeps.accessJwt });
-    registerDramaAdminRoutes(target);
+    registerNovelRoutes(target, { accessJwt: authDeps.accessJwt });
+    registerNovelAdminRoutes(target);
   };
 
   registerJsonApiRoutes(app);

@@ -1,10 +1,10 @@
 # BE-AINovel — AINovel backend
 
 Coin-economy backend: offerwall/postback gateway, double-entry ledger, fraud engine, redemption
-fulfillment, Lucky Spin, referral, drama (watch-to-earn) module, admin API.
+fulfillment, Lucky Spin, referral, novel (read-to-earn) module with CMS, admin API.
 
 Status: business modules implemented (auth, ledger, postback, fraud, redemption, spin,
-rewarded ads, drama, referral, catalog, inbox, admin CMS).
+rewarded ads, novel, referral, catalog, inbox, admin CMS).
 
 ## Stack
 

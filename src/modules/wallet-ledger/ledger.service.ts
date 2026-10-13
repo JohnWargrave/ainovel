@@ -25,6 +25,8 @@ export const UNBACKED_ENTRY_TYPES: readonly LedgerEntryType[] = [
   // definition of unbacked — so it belongs under the rolling cap and the kill-switch like every
   // other config-driven payout.
   'DRAMA_WATCH_CREDIT',
+  // Flat chapter_reward_coin from region config for finishing a free chapter — no revenue behind it.
+  'NOVEL_READ_CREDIT',
 ];
 
 const ONE_TIME_AUTH_REWARD_TYPES: readonly LedgerEntryType[] = [
@@ -331,6 +333,17 @@ export async function releaseHold(pendingEntryId: string): Promise<{ released: b
       .forUpdate()
       .executeTakeFirst();
     if (entry?.bucket !== 'pending' || entry.hold_until === null) {
+      return { released: false };
+    }
+
+    // A suspended or banned account keeps its held coin pending — hold_until stays set, so the
+    // sweep picks it up again once the account is reinstated.
+    const owner = await trx
+      .selectFrom('users')
+      .select('status')
+      .where('id', '=', entry.user_id)
+      .executeTakeFirst();
+    if (owner?.status !== 'active') {
       return { released: false };
     }
 

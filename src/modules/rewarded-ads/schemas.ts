@@ -10,6 +10,7 @@ export const PlacementSchema = Type.Union([
   Type.Literal('checkin'),
   Type.Literal('earncoin'),
   Type.Literal('luckyspin'),
+  Type.Literal('chapter_unlock'),
 ]);
 
 // The null arm is load-bearing, not defensive. Fastify normalises a missing body to `null` before

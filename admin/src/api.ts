@@ -157,28 +157,17 @@ export interface RewardedAdsRegionSettings {
   enabled: boolean;
   daily_cap: number;
   cooldown_s: number;
-  // Per ad unit (checkin / earncoin / luckyspin). A placement missing here inherits the region-wide
-  // daily_cap and cooldown_s above. Read-only in this form — the PUT carries it through untouched.
-  placements: Partial<Record<'checkin' | 'earncoin' | 'luckyspin', RewardedAdPlacementSettings>>;
+  // Per ad unit (checkin / earncoin / luckyspin / chapter_unlock). A placement missing here inherits
+  // the region-wide daily_cap and cooldown_s above. Read-only in this form — the PUT carries it
+  // through untouched. chapter_unlock opens a VIP novel chapter instead of paying coin.
+  placements: Partial<
+    Record<'checkin' | 'earncoin' | 'luckyspin' | 'chapter_unlock', RewardedAdPlacementSettings>
+  >;
   timezone: string;
   updated_at: string;
 }
 export interface RewardedAdsSettingsData {
   items: RewardedAdsRegionSettings[];
-}
-export interface DramaRegionSettings {
-  region_id: string;
-  enabled: boolean;
-  // 0 keeps the player and its progress tracking live while paying nothing.
-  episode_reward_coin: number;
-  // Fraction of an episode's duration that counts as finished.
-  completion_ratio: number;
-  episode_reward_daily_cap: number;
-  timezone: string;
-  updated_at: string;
-}
-export interface DramaSettingsData {
-  items: DramaRegionSettings[];
 }
 export interface SpinConfigAdmin {
   id: string;
@@ -532,7 +521,7 @@ export function getCsrfToken(): string {
   return csrfToken;
 }
 
-function queryString(params: Record<string, string | number | undefined>): string {
+export function queryString(params: Record<string, string | number | undefined>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== '') search.set(key, String(value));
@@ -541,10 +530,12 @@ function queryString(params: Record<string, string | number | undefined>): strin
   return value ? `?${value}` : '';
 }
 
-async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   headers.set('accept', 'application/json');
-  if (options.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
+  // FormData bodies (file uploads) need the browser to set the multipart boundary itself.
+  if (options.body && !(options.body instanceof FormData) && !headers.has('content-type'))
+    headers.set('content-type', 'application/json');
   if (csrfToken && options.method && options.method !== 'GET')
     headers.set('x-csrf-token', csrfToken);
 
@@ -697,25 +688,6 @@ export function updateRewardedAdsSettings(
       body: JSON.stringify(input),
     },
   );
-}
-
-export function getDramaSettings(): Promise<DramaSettingsData> {
-  return api<DramaSettingsData>('/admin/drama/settings');
-}
-
-export function updateDramaSettings(
-  regionId: string,
-  input: {
-    enabled: boolean;
-    episode_reward_coin: number;
-    completion_ratio: number;
-    episode_reward_daily_cap: number;
-  },
-): Promise<DramaRegionSettings> {
-  return api<DramaRegionSettings>(`/admin/drama/settings/${encodeURIComponent(regionId)}`, {
-    method: 'PUT',
-    body: JSON.stringify(input),
-  });
 }
 
 export function getSpinConfigs(): Promise<SpinConfigsData> {

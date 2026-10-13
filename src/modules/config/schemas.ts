@@ -5,7 +5,7 @@ export const ConfigFeatureSchema = Type.Record(Type.String(), Type.Unknown());
 export const ConfigResponseSchema = Type.Object({
   region: Type.String(),
   features: Type.Object({
-    drama: ConfigFeatureSchema,
+    novel: ConfigFeatureSchema,
     spin: ConfigFeatureSchema,
     offerwall: ConfigFeatureSchema,
     rewarded_ads: ConfigFeatureSchema,

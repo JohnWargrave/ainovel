@@ -7,7 +7,8 @@ on:
 
 concurrency:
   group: backend-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a main run: a newer push would kill a deploy mid-migration or mid-recreate.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   verify:
@@ -82,6 +83,8 @@ jobs:
     needs: verify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # Lets the repo add required reviewers / branch rules for production deploys.
+    environment: production
     env:
       DEPLOY_SERVER_USER: ${{ vars.DEPLOY_MAIN_SERVER_USER }}
       DEPLOY_SERVER_ADDR: ${{ vars.DEPLOY_MAIN_SERVER_ADDR }}
@@ -128,9 +131,6 @@ jobs:
             # deployment host and get copied into the Docker build context.
             tar --extract --gzip --file backend-source.tar.gz --recursive-unlink
             rm -f backend-source.tar.gz
-            if [ ! -f '$PROD_ENV_FILE' ] && [ -f '.env' ]; then
-              cp .env '$PROD_ENV_FILE'
-            fi
             if [ ! -f '$PROD_ENV_FILE' ]; then
               echo "Missing $PROD_ENV_FILE on deploy host. Create it with production values before deploying."
               exit 1
@@ -139,5 +139,15 @@ jobs:
             docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml build migrate backend-api backend-worker
             docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml run --rm -T migrate </dev/null
             docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml up -d --force-recreate --remove-orphans backend-api backend-worker
+            # Fail the deploy (with logs) if the API never turns healthy, instead of reporting success.
+            for attempt in \$(seq 1 36); do
+              status=\$(docker inspect --format '{{.State.Health.Status}}' \$(docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml ps -q backend-api))
+              [ "\$status" = healthy ] && break
+              sleep 5
+            done
+            if [ "\$status" != healthy ]; then
+              docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml logs --tail 100 backend-api backend-worker
+              exit 1
+            fi
             docker image prune -f >/dev/null 2>&1 || true
           EOF

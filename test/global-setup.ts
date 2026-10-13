@@ -31,6 +31,16 @@ const DATA_TABLES = [
   'audit_log',
   'inbox_messages',
   'catalog_staging',
+  'novel_import_chapters',
+  'novel_import_jobs',
+  'novel_read_progress',
+  'novel_chapter_unlocks',
+  'novel_library',
+  'novel_chapter_revisions',
+  'novel_chapters',
+  'novel_category_links',
+  'novels',
+  'novel_categories',
 ] as const;
 
 const DATABASE_URL =

@@ -5,7 +5,7 @@ import { db, closeDb } from '../db/index.js';
 const email = process.argv[2]?.trim().toLowerCase();
 const role = process.argv[3] ?? 'superadmin';
 const password = process.env['ADMIN_NEW_PASSWORD'];
-const roles = ['analyst', 'fulfillment', 'reviewer', 'superadmin'];
+const roles = ['analyst', 'editor', 'fulfillment', 'reviewer', 'superadmin'];
 
 if (!email || !password || password.length < 12 || !roles.includes(role)) {
   process.stderr.write(

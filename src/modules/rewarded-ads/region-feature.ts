@@ -1,8 +1,8 @@
 import { db } from '../../db/index.js';
 
-// The three AdMob rewarded units the app ships. A request naming anything else is rejected at the
+// The AdMob rewarded units the app ships (chapter_unlock buys a VIP novel chapter, not coin). A request naming anything else is rejected at the
 // schema, and a NULL placement on an existing row means "created before placements existed".
-export const REWARDED_AD_PLACEMENTS = ['checkin', 'earncoin', 'luckyspin'] as const;
+export const REWARDED_AD_PLACEMENTS = ['checkin', 'earncoin', 'luckyspin', 'chapter_unlock'] as const;
 export type RewardedAdPlacement = (typeof REWARDED_AD_PLACEMENTS)[number];
 
 export interface RewardedAdPlacementFeature {

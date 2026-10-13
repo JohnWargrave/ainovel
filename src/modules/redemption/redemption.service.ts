@@ -373,6 +373,9 @@ export async function createRedemption(
       .selectFrom('users')
       .select(['id', 'country_code', 'region_id', 'trust_level', 'status', 'created_at'])
       .where('id', '=', userId)
+      // Serializes concurrent redemptions per user: the weekly-cap sum and the first-redemption check
+      // below are reads, so without this lock parallel requests would each pass them.
+      .forUpdate()
       .executeTakeFirst();
     if (!user) {
       throw new AppError('USER_NOT_FOUND', 'User not found', 404);

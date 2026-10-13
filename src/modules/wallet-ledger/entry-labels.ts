@@ -2,7 +2,7 @@
 // have to keep its own copy of this map — adding an entry type used to silently degrade every
 // existing client's history screen to a generic "Coin activity" row.
 //
-// Keep in sync with the ledger_entry_type enum (migrations 5, 11, 23).
+// Keep in sync with the ledger_entry_type enum (migrations 5, 11, 23, 62, 65).
 const ENTRY_LABELS: Record<string, string> = {
   OFFERWALL_CREDIT: 'Offer reward',
   OFFERWALL_CLAWBACK: 'Offer reversed',
@@ -22,6 +22,9 @@ const ENTRY_LABELS: Record<string, string> = {
   HOLD_RELEASE: 'Pending released',
   WELCOME_CREDIT: 'Welcome bonus',
   LOGIN_BIND_CREDIT: 'Account linked bonus',
+  DIRECT_CREDIT: 'Coin reward',
+  NOVEL_READ_CREDIT: 'Chapter reading reward',
+  CHAPTER_UNLOCK_DEBIT: 'Chapter unlock',
 };
 
 export function entryLabel(entryType: string): string {

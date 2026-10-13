@@ -33,7 +33,9 @@ export type LedgerEntryType =
   | 'HOLD_RELEASE'
   | 'WELCOME_CREDIT'
   | 'LOGIN_BIND_CREDIT'
-  | 'DIRECT_CREDIT';
+  | 'DIRECT_CREDIT'
+  | 'NOVEL_READ_CREDIT'
+  | 'CHAPTER_UNLOCK_DEBIT';
 
 export type RedemptionStatus =
   'REQUESTED' | 'FRAUD_REVIEW' | 'APPROVED' | 'PURCHASING' | 'DELIVERED' | 'REJECTED' | 'FAILED';
@@ -299,6 +301,7 @@ interface RewardedAdIntentsTable {
   geo_at_intent: string | null;
   placement: string | null;
   spin_history_id: string | null;
+  chapter_unlock_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 interface CatalogItemsTable {
@@ -365,66 +368,151 @@ interface RedemptionStatusHistoryTable {
   created_at: GeneratedTimestamp;
 }
 
-interface DramaSeriesTable {
+interface NovelCategoriesTable {
   id: string;
-  title: string;
-  description: string | null;
-  cover_url: string | null;
-  license_regions: string[];
-  license_expires: string | null;
-  total_episodes: number;
-  interstitial_every: Generated<number>;
-  status: Generated<string>;
-  created_at: GeneratedTimestamp;
-}
-
-interface DramaEpisodesTable {
-  id: string;
-  series_id: string;
-  episode_no: number;
-  byteplus_vid: string;
-  duration_s: number;
-}
-
-interface DramaAdImpressionsTable {
-  id: string;
-  user_id: string;
-  intent_id: string;
-  episode_id: string | null;
-  ad_network: string | null;
-  revenue_source: string;
-  est_revenue_usd: Numeric;
-  coin_awarded: Bigint;
-  geo: string | null;
-  reconciled: Generated<boolean>;
-  created_at: GeneratedTimestamp;
-}
-
-interface WatchSessionsTable {
-  id: string;
-  user_id: string;
-  episode_id: string;
-  watch_time_s: Generated<number>;
-  geo: string | null;
-  ip: string | null;
-  rewarded: Generated<boolean>;
+  slug: string;
+  name: string;
+  sort_order: Generated<number>;
+  is_active: Generated<boolean>;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
 }
 
-// Server-verified progress for POST /drama/watch-heartbeat. drama_id is the app's own catalog id
-// with no FK — see migration 1700000000064.
-interface DramaWatchProgressTable {
+export type NovelStatus = 'draft' | 'published' | 'hidden' | 'archived';
+export type NovelCompletionStatus = 'ongoing' | 'completed' | 'hiatus';
+
+interface NovelsTable {
+  id: string;
+  slug: string;
+  title: string;
+  alt_titles: Generated<string[]>;
+  author: string | null;
+  translator: string | null;
+  description: string | null;
+  cover_url: string | null;
+  cover_key: string | null;
+  status: Generated<NovelStatus>;
+  completion_status: Generated<NovelCompletionStatus>;
+  language: Generated<string>;
+  tags: Generated<string[]>;
+  regions: string[] | null;
+  is_featured: Generated<boolean>;
+  featured_rank: Generated<number>;
+  vip_from_chapter: number | null;
+  default_unlock_coin: Generated<number>;
+  allow_ad_unlock: Generated<boolean>;
+  chapter_count: Generated<number>;
+  word_count: GeneratedBigint;
+  search_text: Generated<string>;
+  published_at: Timestamp | null;
+  created_by: string | null;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+interface NovelCategoryLinksTable {
+  novel_id: string;
+  category_id: string;
+}
+
+interface NovelChaptersTable {
+  id: string;
+  novel_id: string;
+  chapter_no: number;
+  title: Generated<string>;
+  content: Generated<string>;
+  word_count: Generated<number>;
+  is_vip: boolean | null;
+  unlock_coin_price: number | null;
+  status: Generated<'draft' | 'published'>;
+  publish_at: Timestamp | null;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+interface NovelChapterRevisionsTable {
+  id: string;
+  chapter_id: string;
+  title: string;
+  content: string;
+  edited_by: string | null;
+  created_at: GeneratedTimestamp;
+}
+
+interface NovelChapterUnlocksTable {
   id: string;
   user_id: string;
-  drama_id: string;
-  episode_index: number;
-  duration_s: number;
-  watch_time_s: Generated<number>;
-  last_position_s: Generated<number>;
-  last_heartbeat_at: GeneratedTimestamp;
-  rewarded_at: Timestamp | null;
+  chapter_id: string;
+  novel_id: string;
+  method: 'coin' | 'ad';
+  coin_spent: Generated<number>;
+  ad_intent_id: string | null;
   created_at: GeneratedTimestamp;
+}
+
+// Server-verified reading progress for POST /novels/read-heartbeat — see migration 1700000000066.
+interface NovelReadProgressTable {
+  id: string;
+  user_id: string;
+  chapter_id: string;
+  novel_id: string;
+  read_time_s: Generated<number>;
+  max_scroll_ratio: GeneratedNumeric;
+  last_heartbeat_at: Timestamp;
+  rewarded_at: Timestamp | null;
+  completed_at: Timestamp | null;
+  created_at: GeneratedTimestamp;
+}
+
+interface NovelLibraryTable {
+  user_id: string;
+  novel_id: string;
+  last_chapter_id: string | null;
+  last_chapter_no: number | null;
+  last_read_at: Timestamp | null;
+  in_bookshelf: Generated<boolean>;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export type NovelImportFormat = 'epub' | 'txt' | 'md' | 'docx' | 'json' | 'zip';
+export type NovelImportMode = 'new' | 'append' | 'replace';
+export type NovelImportStatus =
+  | 'queued'
+  | 'parsing'
+  | 'ready'
+  | 'committing'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+interface NovelImportJobsTable {
+  id: string;
+  admin_user_id: string | null;
+  format: NovelImportFormat;
+  filename: string;
+  file_key: string | null;
+  mode: NovelImportMode;
+  target_novel_id: string | null;
+  chapter_pattern: string | null;
+  status: Generated<NovelImportStatus>;
+  preview: unknown;
+  stats: unknown;
+  errors: unknown;
+  result_novel_ids: Generated<string[]>;
+  created_at: GeneratedTimestamp;
+  finished_at: Timestamp | null;
+}
+
+interface NovelImportChaptersTable {
+  id: string;
+  job_id: string;
+  novel_index: Generated<number>;
+  chapter_no: number;
+  title: Generated<string>;
+  content: string;
+  word_count: number;
+  warnings: Generated<string[]>;
 }
 
 interface SpinConfigTable {
@@ -513,11 +601,16 @@ export interface DB {
   fx_rates: FxRatesTable;
   redemptions: RedemptionsTable;
   redemption_status_history: RedemptionStatusHistoryTable;
-  drama_series: DramaSeriesTable;
-  drama_episodes: DramaEpisodesTable;
-  drama_ad_impressions: DramaAdImpressionsTable;
-  watch_sessions: WatchSessionsTable;
-  drama_watch_progress: DramaWatchProgressTable;
+  novel_categories: NovelCategoriesTable;
+  novels: NovelsTable;
+  novel_category_links: NovelCategoryLinksTable;
+  novel_chapters: NovelChaptersTable;
+  novel_chapter_revisions: NovelChapterRevisionsTable;
+  novel_chapter_unlocks: NovelChapterUnlocksTable;
+  novel_read_progress: NovelReadProgressTable;
+  novel_library: NovelLibraryTable;
+  novel_import_jobs: NovelImportJobsTable;
+  novel_import_chapters: NovelImportChaptersTable;
   spin_config: SpinConfigTable;
   spin_history: SpinHistoryTable;
   fraud_flags: FraudFlagsTable;

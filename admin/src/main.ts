@@ -1,6 +1,5 @@
 import './styles.css';
 import {
-  ApiError,
   adjustUserCoin,
   archiveOfferwallOffer,
   approveRedemption,
@@ -14,7 +13,6 @@ import {
   getRedemptionSettings,
   createCatalogItem,
   getAnalyticsTimeseries,
-  getDramaSettings,
   getEconomyAnalytics,
   getOfferwallAdminData,
   getReferralAdminData,
@@ -42,7 +40,6 @@ import {
   updateOfferwallRegionSettings,
   updateCatalogItem,
   updateCoinRewardSettings,
-  updateDramaSettings,
   updateRedemptionSettings,
   updateReferralCode,
   updateReferralSettings,
@@ -59,7 +56,6 @@ import {
   type DashboardResponse,
   type EconomyAnalytics,
   type CoinRewardSettings,
-  type DramaSettingsData,
   type OfferwallAdminData,
   type OfferwallOffer,
   type PagedResponse,
@@ -87,6 +83,19 @@ import {
   type BarRow,
   type ChartSeries,
 } from './charts.js';
+import {
+  errorMessage,
+  escapeHtml,
+  formatDate,
+  formatJson,
+  integer,
+  isoDateTime,
+  localDateTime,
+  money,
+  splitValues,
+} from './format.js';
+import { getNovelSettings, updateNovelSettings, type NovelSettingsData } from './novels-api.js';
+import { loadNovelsPage, renderNovelsPage, resetNovelsState, type NovelsHost } from './novels.js';
 
 type Page =
   | 'dashboard'
@@ -96,6 +105,7 @@ type Page =
   | 'users'
   | 'referrals'
   | 'redemptions'
+  | 'novels'
   | 'settings'
   | 'audit';
 type OfferwallTab = 'cards' | 'providers' | 'regions';
@@ -139,7 +149,7 @@ interface AppState {
   redemptionSettings: RedemptionSettingsData | null;
   rewardedAdsSettings: RewardedAdsSettingsData | null;
   spinConfigs: SpinConfigsData | null;
-  dramaSettings: DramaSettingsData | null;
+  novelSettings: NovelSettingsData | null;
   audit: PagedResponse<AuditLogEntry> | null;
   rewardMonitor: RewardMonitorResponse | null;
   rewardMonitorQuery: {
@@ -183,7 +193,7 @@ const state: AppState = {
   redemptionSettings: null,
   rewardedAdsSettings: null,
   spinConfigs: null,
-  dramaSettings: null,
+  novelSettings: null,
   audit: null,
   rewardMonitor: null,
   rewardMonitorQuery: { window_hours: 24, user_id: '', transaction_id: '' },
@@ -193,62 +203,6 @@ const state: AppState = {
 function setState(next: Partial<AppState>): void {
   Object.assign(state, next);
   render();
-}
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
-
-function formatJson(value: unknown): string {
-  if (value === null || value === undefined) return '—';
-  if (typeof value === 'string') return value;
-  return JSON.stringify(value, null, 2);
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) return `${error.code}: ${error.message}`;
-  if (error instanceof Error) return error.message;
-  return 'Unexpected error';
-}
-
-function money(value: number): string {
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(value);
-}
-
-function integer(value: string | number): string {
-  return new Intl.NumberFormat().format(Number(value));
-}
-
-function escapeHtml(value: unknown): string {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
-
-function localDateTime(value: string | null): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-}
-
-function isoDateTime(value: FormDataEntryValue | null): string | null {
-  const raw = String(value ?? '').trim();
-  if (!raw) return null;
-  return new Date(raw).toISOString();
-}
-
-function splitValues(value: FormDataEntryValue | null): string[] {
-  return String(value ?? '')
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
 }
 
 function setPage(page: Page): void {
@@ -284,14 +238,22 @@ function shell(content: string): string {
     ['users', 'Users'],
     ['referrals', 'Referrals'],
     ['redemptions', 'Redemptions'],
+    ['novels', 'Novels'],
     ['settings', 'Settings'],
     ['audit', 'Audit log'],
   ];
-  const tabs = allTabs.filter(
-    ([page]) =>
-      (!['offers', 'settings'].includes(page) || state.session?.role === 'superadmin') &&
-      (page !== 'referrals' || state.session?.role !== 'fulfillment'),
-  );
+  const role = state.session?.role;
+  // Editors manage novel content only; every other tab's endpoints would 403 for them. Novels is
+  // readable by analysts (stats) and editable by superadmins.
+  const tabs =
+    role === 'editor'
+      ? allTabs.filter(([page]) => page === 'novels')
+      : allTabs.filter(
+          ([page]) =>
+            (!['offers', 'settings'].includes(page) || role === 'superadmin') &&
+            (page !== 'referrals' || role !== 'fulfillment') &&
+            (page !== 'novels' || role === 'analyst' || role === 'superadmin'),
+        );
   return `
     <div class="app-shell">
       <aside class="sidebar">
@@ -351,10 +313,14 @@ function renderLogin(): void {
     void runAction(
       async () => login(email, password),
       async (session) => {
+        if (session.admin_user.role === 'editor')
+          return { session: session.admin_user, page: 'novels' };
         const dashboard = await getDashboard();
         return { session: session.admin_user, page: 'dashboard', dashboard };
       },
-    );
+    ).then(() => {
+      if (state.page === 'novels' && state.session) void loadPage('novels');
+    });
   });
 }
 
@@ -364,7 +330,10 @@ function wireShell(): void {
   });
   document.querySelector<HTMLButtonElement>('#logoutButton')?.addEventListener('click', () => {
     void runAction(
-      async () => logout(),
+      async () => {
+        await logout();
+        resetNovelsState();
+      },
       () => ({
         session: null,
         page: 'dashboard',
@@ -389,7 +358,7 @@ function wireShell(): void {
         redemptionSettings: null,
         rewardedAdsSettings: null,
         spinConfigs: null,
-        dramaSettings: null,
+        novelSettings: null,
         audit: null,
         rewardMonitor: null,
         rewardMonitorHistory: [],
@@ -2219,7 +2188,11 @@ function placementSummary(region: RewardedAdsRegionSettings): string {
   const rows = entries
     .map(
       ([placement, settings]) =>
-        `<li>${escapeHtml(placement)} — ${integer(settings.daily_cap)}/day, ${integer(settings.cooldown_s)}s cooldown, ${String(settings.coin_multiplier)}× coin</li>`,
+        `<li>${escapeHtml(placement)} — ${integer(settings.daily_cap)}/day, ${integer(settings.cooldown_s)}s cooldown, ${
+          placement === 'chapter_unlock'
+            ? 'unlocks one VIP novel chapter (pays no coin)'
+            : `${String(settings.coin_multiplier)}× coin`
+        }</li>`,
     )
     .join('');
   return `<div class="muted"><p>Per-placement overrides:</p><ul>${rows}</ul></div>`;
@@ -2310,40 +2283,66 @@ function spinSection(data?: SpinConfigsData): string {
 }
 
 // The reward only fires when `enabled` is on AND the payout is above zero — the seeded default is
-// off with no payout, which is why a region that has never been through this form pays nothing no
-// matter how much of an episode is watched.
-function dramaSection(data?: DramaSettingsData): string {
+// off, which is why a region that has never been through this form pays nothing no matter how many
+// chapters are read. Only free chapters earn it; VIP chapters are bought, not rewarded.
+function novelSection(data?: NovelSettingsData): string {
   return `<section class="settings-section">
       <div class="settings-section-heading">
-        <div><p class="eyebrow">Drama</p><h3>Episode watch reward by region</h3></div>
+        <div><p class="eyebrow">Novels</p><h3>Chapter reading reward by region</h3></div>
       </div>
       <div class="redemption-settings-grid">
         ${(data?.items ?? [])
           .map((region) => {
-            const inertPayout = region.enabled && region.episode_reward_coin === 0;
-            const inertCap = region.enabled && region.episode_reward_daily_cap === 0;
-            return `<form class="panel drama-settings-form" data-drama-region="${escapeHtml(region.region_id)}">
+            const inertPayout = region.enabled && region.chapter_reward_coin === 0;
+            const inertCap = region.enabled && region.chapter_reward_daily_cap === 0;
+            const badClamp = region.min_read_seconds > region.max_read_seconds;
+            // A 2,000-word chapter is a typical web-novel chapter; shows what the knobs add up to.
+            const sampleSeconds = Math.min(
+              Math.max(
+                (2000 / region.reading_wpm) * 60 * region.min_read_ratio,
+                region.min_read_seconds,
+              ),
+              region.max_read_seconds,
+            );
+            return `<form class="panel novel-settings-form" data-novel-region="${escapeHtml(region.region_id)}">
               <div class="section-heading">
                 <div><p class="eyebrow">Region</p><h3>${escapeHtml(region.region_id)}</h3></div>
-                <label class="switch-label"><input name="enabled" type="checkbox" ${region.enabled ? 'checked' : ''} /> Watch reward enabled</label>
+                <label class="switch-label"><input name="enabled" type="checkbox" ${region.enabled ? 'checked' : ''} /> Reading reward enabled</label>
               </div>
               <div class="form-grid">
                 <label>
-                  Coin per finished episode
-                  <input name="episode_reward_coin" type="number" min="0" max="1000000" step="1" value="${region.episode_reward_coin}" required />
+                  Coin per finished chapter
+                  <input name="chapter_reward_coin" type="number" min="0" max="1000000" step="1" value="${region.chapter_reward_coin}" required />
                 </label>
                 <label>
-                  Rewarded episodes per day
-                  <input name="episode_reward_daily_cap" type="number" min="0" max="10000" step="1" value="${region.episode_reward_daily_cap}" required />
+                  Rewarded chapters per day
+                  <input name="chapter_reward_daily_cap" type="number" min="0" max="10000" step="1" value="${region.chapter_reward_daily_cap}" required />
                 </label>
                 <label>
-                  Completion ratio
-                  <input name="completion_ratio" type="number" min="0.1" max="1" step="0.05" value="${region.completion_ratio}" required />
+                  Reading speed (words/min)
+                  <input name="reading_wpm" type="number" min="50" max="2000" step="1" value="${region.reading_wpm}" required />
+                </label>
+                <label>
+                  Minimum read ratio
+                  <input name="min_read_ratio" type="number" min="0.1" max="1" step="0.05" value="${region.min_read_ratio}" required />
+                </label>
+                <label>
+                  Minimum read time (s)
+                  <input name="min_read_seconds" type="number" min="5" max="3600" step="1" value="${region.min_read_seconds}" required />
+                </label>
+                <label>
+                  Maximum read time (s)
+                  <input name="max_read_seconds" type="number" min="10" max="7200" step="1" value="${region.max_read_seconds}" required />
+                </label>
+                <label>
+                  Scroll needed to finish
+                  <input name="completion_scroll_ratio" type="number" min="0" max="1" step="0.05" value="${region.completion_scroll_ratio}" required />
                 </label>
               </div>
-              <p class="muted">Counted from server-verified watch time, not the player's position — a 90s episode at ${region.completion_ratio}× needs ${integer(Math.ceil(90 * region.completion_ratio))}s watched. Resets at midnight ${escapeHtml(region.timezone)}.</p>
-              ${inertPayout ? '<div class="config-warning">Enabled but paying 0 coin — the player and its progress tracking stay live, and no episode ever credits.</div>' : ''}
-              ${inertCap ? '<div class="config-warning">Enabled but capped at 0 rewarded episodes per day, so no episode ever credits.</div>' : ''}
+              <p class="muted">Counted from server-verified reading time against the chapter's stored word count — a 2,000-word chapter needs ${integer(Math.ceil(sampleSeconds))}s of reading and ${Math.round(region.completion_scroll_ratio * 100)}% scrolled. Resets at midnight ${escapeHtml(region.timezone)}.</p>
+              ${inertPayout ? '<div class="config-warning">Enabled but paying 0 coin — reading progress is tracked, and no chapter ever credits.</div>' : ''}
+              ${inertCap ? '<div class="config-warning">Enabled but capped at 0 rewarded chapters per day, so no chapter ever credits.</div>' : ''}
+              ${badClamp ? '<div class="config-warning">Minimum read time is above the maximum.</div>' : ''}
               <div class="form-actions">
                 <button type="submit">Save region</button>
                 <span class="muted">Updated ${formatDate(region.updated_at)}</span>
@@ -2360,7 +2359,7 @@ function renderSettings(
   redemptionSettings?: RedemptionSettingsData,
   rewardedAdsSettings?: RewardedAdsSettingsData,
   spinConfigs?: SpinConfigsData,
-  dramaSettings?: DramaSettingsData,
+  novelSettings?: NovelSettingsData,
 ): void {
   const welcomeCoin = settings?.welcome_coin ?? 0;
   const googleLoginCoin = settings?.google_login ?? 0;
@@ -2446,7 +2445,7 @@ function renderSettings(
     </section>
     ${rewardedAdsSection(rewardedAdsSettings)}
     ${spinSection(spinConfigs)}
-    ${dramaSection(dramaSettings)}
+    ${novelSection(novelSettings)}
   `);
   wireShell();
   document
@@ -2519,24 +2518,28 @@ function renderSettings(
     });
   });
 
-  document.querySelectorAll<HTMLFormElement>('[data-drama-region]').forEach((form) => {
+  document.querySelectorAll<HTMLFormElement>('[data-novel-region]').forEach((form) => {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      const regionId = form.dataset['dramaRegion'];
-      if (!regionId || !dramaSettings) return;
+      const regionId = form.dataset['novelRegion'];
+      if (!regionId || !novelSettings) return;
       const values = new FormData(form);
       void runAction(
         () =>
-          updateDramaSettings(regionId, {
+          updateNovelSettings(regionId, {
             enabled: values.get('enabled') === 'on',
-            episode_reward_coin: Number(values.get('episode_reward_coin')),
-            completion_ratio: Number(values.get('completion_ratio')),
-            episode_reward_daily_cap: Number(values.get('episode_reward_daily_cap')),
+            chapter_reward_coin: Number(values.get('chapter_reward_coin')),
+            chapter_reward_daily_cap: Number(values.get('chapter_reward_daily_cap')),
+            reading_wpm: Number(values.get('reading_wpm')),
+            min_read_ratio: Number(values.get('min_read_ratio')),
+            min_read_seconds: Number(values.get('min_read_seconds')),
+            max_read_seconds: Number(values.get('max_read_seconds')),
+            completion_scroll_ratio: Number(values.get('completion_scroll_ratio')),
           }),
         (updated) => ({
-          dramaSettings: {
-            ...dramaSettings,
-            items: dramaSettings.items.map((region) =>
+          novelSettings: {
+            ...novelSettings,
+            items: novelSettings.items.map((region) =>
               region.region_id === updated.region_id ? updated : region,
             ),
           },
@@ -2563,6 +2566,15 @@ function renderSettings(
     });
   });
 }
+
+const novelsHost: NovelsHost = {
+  root: appRoot,
+  shell,
+  wireShell,
+  setStatus: (next) => setState(next),
+  isActive: () => state.page === 'novels' && state.session !== null,
+  role: () => state.session?.role,
+};
 
 async function loadPage(page: Page): Promise<void> {
   setState({ loading: true, error: null });
@@ -2602,23 +2614,24 @@ async function loadPage(page: Page): Promise<void> {
         redemptionSettings,
         rewardedAdsSettings,
         spinConfigs,
-        dramaSettings,
+        novelSettings,
       ] = await Promise.all([
         getCoinRewardSettings(),
         getRedemptionSettings(),
         getRewardedAdsSettings(),
         getSpinConfigs(),
-        getDramaSettings(),
+        getNovelSettings(),
       ]);
       setState({
         coinRewardSettings,
         redemptionSettings,
         rewardedAdsSettings,
         spinConfigs,
-        dramaSettings,
+        novelSettings,
         loading: false,
       });
     }
+    if (page === 'novels') await loadNovelsPage(novelsHost);
     if (page === 'audit') setState({ audit: await listAuditLog({}), loading: false });
   } catch (error) {
     setState({ error: errorMessage(error), loading: false });
@@ -2643,8 +2656,9 @@ function render(): void {
       state.redemptionSettings ?? undefined,
       state.rewardedAdsSettings ?? undefined,
       state.spinConfigs ?? undefined,
-      state.dramaSettings ?? undefined,
+      state.novelSettings ?? undefined,
     );
+  if (state.page === 'novels') renderNovelsPage(novelsHost);
   if (state.page === 'audit') renderAudit(state.audit ?? undefined);
 }
 
@@ -2652,6 +2666,7 @@ async function boot(): Promise<void> {
   try {
     const session = await currentSession();
     state.session = session.admin_user;
+    if (session.admin_user.role === 'editor') state.page = 'novels';
     await loadPage(state.page);
   } catch {
     state.session = null;

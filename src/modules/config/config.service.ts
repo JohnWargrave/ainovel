@@ -5,7 +5,7 @@ import { COIN_PER_USD, MIN_REDEMPTION_USD } from '../../lib/economy.js';
 import { cacheRedis } from '../../redis/index.js';
 import { env } from '../../config/env.js';
 import { parseRewardedAdsFeature } from '../rewarded-ads/region-feature.js';
-import { parseDramaFeature } from '../drama/region-feature.js';
+import { parseNovelFeature } from '../novel/region-feature.js';
 import type { ConfigResponse } from './schemas.js';
 
 const CONFIG_CACHE_PREFIX = 'config:v1:';
@@ -13,7 +13,7 @@ const CONFIG_CACHE_TTL_S = 60;
 const DEFAULT_TRUST_LEVEL = '0';
 
 interface RegionFeatures {
-  drama?: Record<string, unknown>;
+  novel?: Record<string, unknown>;
   spin?: {
     enabled?: boolean;
     table_id?: unknown;
@@ -110,12 +110,12 @@ async function buildPayload(regionId: string, features: RegionFeatures): Promise
   return {
     region: regionId,
     features: {
-      // The reward parameters ship here so the player can render "+N 🪙 at X%" without an
-      // authenticated round trip. The credit itself is still decided server-side from verified
-      // watch time — these are display values, not an authority the client can act on.
+      // The reward parameters ship here so the reader can render "+N 🪙" without an authenticated
+      // round trip. The credit itself is still decided server-side from verified reading time —
+      // these are display values, not an authority the client can act on.
       // Spread rather than passed straight through: ConfigFeatureSchema is a Record<string,
       // unknown>, and an interface has no implicit index signature to satisfy it.
-      drama: { ...parseDramaFeature(features) },
+      novel: { ...parseNovelFeature(features) },
       spin,
       offerwall: {
         enabled: features.offerwall?.enabled === true,

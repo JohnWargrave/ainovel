@@ -19,7 +19,7 @@ import {
   type CmsSessionResponse,
 } from './schemas.js';
 
-const CMS_ROLES = ['analyst', 'fulfillment', 'reviewer', 'superadmin'] as const;
+const CMS_ROLES = ['analyst', 'editor', 'fulfillment', 'reviewer', 'superadmin'] as const;
 const CMS_LOCK_THRESHOLD = 5;
 const CMS_LOCK_MS = 15 * 60 * 1000;
 const DUMMY_ADMIN_HASH = hashPassword('not-a-real-admin-password', {
@@ -93,16 +93,17 @@ export function registerAdminSessionRoutes(app: FastifyInstance): void {
         validPassword &&
         CMS_ROLES.includes(row.role as (typeof CMS_ROLES)[number]);
       if (!accountValid) {
-        if (row) {
-          const nextFailures = row.failed_login_count + 1;
+        // While locked, failures neither count nor extend the lock — otherwise one bad attempt per
+        // lock window keeps an admin out forever. Once a lock has expired the count starts over.
+        if (row && !locked) {
+          const lockExpired = row.locked_until !== null;
+          const nextFailures = (lockExpired ? 0 : row.failed_login_count) + 1;
           await db
             .updateTable('admin_users')
             .set({
               failed_login_count: nextFailures,
               locked_until:
-                nextFailures >= CMS_LOCK_THRESHOLD
-                  ? new Date(Date.now() + CMS_LOCK_MS)
-                  : row.locked_until,
+                nextFailures >= CMS_LOCK_THRESHOLD ? new Date(Date.now() + CMS_LOCK_MS) : null,
             })
             .where('id', '=', row.id)
             .execute();

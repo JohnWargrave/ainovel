@@ -1318,3 +1318,209 @@ dialog p {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+
+/* ---- Novels ---- */
+
+.novel-filter {
+  display: grid;
+  grid-template-columns: minmax(200px, 2fr) repeat(6, minmax(110px, 1fr)) auto;
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.novel-filter-panel {
+  margin-bottom: 1rem;
+}
+
+.select-cell {
+  width: 2.5rem;
+}
+
+.select-cell input {
+  width: 18px;
+  height: 18px;
+}
+
+.novel-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.novel-cover-thumb {
+  flex: none;
+  width: 40px;
+  height: 56px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #eef1f6;
+}
+
+.novel-cover-thumb.large {
+  width: 96px;
+  height: 136px;
+}
+
+.novel-cover-large {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  margin-bottom: 0.75rem;
+  border-radius: 12px;
+  object-fit: cover;
+  background: #eef1f6;
+  color: #98a2b3;
+  place-items: center;
+}
+
+.novel-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.novel-side {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.novel-side small {
+  display: block;
+  margin-top: 0.5rem;
+}
+
+.novel-fieldset {
+  border: 0;
+  padding: 0;
+}
+
+.vip-policy {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+}
+
+.secondary-link {
+  background: #e9edf7;
+  color: #26334d;
+}
+
+.secondary-link:hover {
+  background: #d8deec;
+}
+
+.small-link {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.8rem;
+}
+
+.chapter-toolbar {
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.chapter-toolbar .inline-form {
+  width: auto;
+}
+
+.novel-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.novel-metrics article {
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid #edf1f7;
+  border-radius: 12px;
+  padding: 0.75rem;
+}
+
+.novel-metrics span {
+  color: #68758f;
+  font-size: 0.8rem;
+}
+
+.novel-status-published,
+.import-status-done {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.novel-status-draft,
+.import-status-queued,
+.import-status-parsing,
+.import-status-committing {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.novel-status-hidden,
+.import-status-cancelled {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.novel-status-archived,
+.import-status-failed {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.import-status-ready {
+  background: #eef3ff;
+  color: #2456ff;
+}
+
+.novel-vip {
+  background: #fdf4ff;
+  color: #a21caf;
+}
+
+.import-novel {
+  margin: 0 0 1rem;
+}
+
+.import-warning-pill {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.import-warning-row td {
+  background: #fffbeb;
+}
+
+.import-excerpt {
+  display: block;
+  max-width: 420px;
+  color: #68758f;
+}
+
+.revision-row summary {
+  cursor: pointer;
+}
+
+.revision-content {
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: #f8fafc;
+  white-space: pre-wrap;
+}
+
+.category-form {
+  width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .novel-filter,
+  .novel-layout,
+  .vip-policy {
+    grid-template-columns: 1fr;
+  }
+}

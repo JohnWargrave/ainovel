@@ -13,6 +13,12 @@ export async function checkRateLimit(
   await checkSubjectRateLimit(keyPrefix, ip, windowS, maxRequests);
 }
 
+const INCR_WITH_TTL = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return count
+`;
+
 export async function checkSubjectRateLimit(
   keyPrefix: string,
   subject: string,
@@ -20,10 +26,9 @@ export async function checkSubjectRateLimit(
   maxRequests: number,
 ): Promise<void> {
   const key = `${keyPrefix}:ratelimit:${subject}`;
-  const count = await rateLimitRedis.incr(key);
-  if (count === 1) {
-    await rateLimitRedis.expire(key, windowS);
-  }
+  // INCR and EXPIRE in one script: as two round-trips, a failed EXPIRE would leave a counter that
+  // never expires and block the subject permanently.
+  const count = Number(await rateLimitRedis.eval(INCR_WITH_TTL, 1, key, windowS));
   if (count > maxRequests) {
     throw new AppError('RATE_LIMITED', `Too many requests to ${keyPrefix}`, 429);
   }

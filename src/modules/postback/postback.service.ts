@@ -62,7 +62,7 @@ function verifyForNetwork(
 async function processCredit(
   network: string,
   normalized: NormalizedPostback,
-  user: { id: string; region_id: string; trust_level: number },
+  user: { id: string; region_id: string; trust_level: number; status: string },
   config: NetworkConfig,
 ): Promise<string> {
   const share = await getOfferwallShare(user.region_id, user.trust_level);
@@ -71,8 +71,11 @@ async function processCredit(
     normalized.payoutUsd > config.highValueThresholdUsd
       ? config.highValueHoldHours
       : config.holdHours;
-  const bucket = config.creditImmediately ? 'available' : 'pending';
-  const holdUntil = config.creditImmediately
+  // The network has paid, so the credit is still recorded — but a suspended/banned account never
+  // gets it as spendable coin: it is held, and releaseHold skips it until the account is reinstated.
+  const creditImmediately = config.creditImmediately && user.status === 'active';
+  const bucket = creditImmediately ? 'available' : 'pending';
+  const holdUntil = creditImmediately
     ? undefined
     : new Date(Date.now() + holdHours * 60 * 60 * 1000);
   const earningEventId = uuidv7();
@@ -129,19 +132,22 @@ async function processReversal(
   normalized: NormalizedPostback,
   original: OriginalEarningEvent,
 ): Promise<{ referrerId: string | null }> {
-  const originalLedgerEntry = await db
-    .selectFrom('coin_ledger')
-    .select('hold_until')
-    .where('ref_type', '=', 'earning_event')
-    .where('ref_id', '=', original.id)
-    .where('entry_type', '=', 'OFFERWALL_CREDIT')
-    .executeTakeFirst();
-  // Still-held coin lives in pending_coin (CHECK(pending_coin >= 0) — a legitimate reversal never
-  // exceeds what's still held there); once released to available_coin, clawbacks are allowed to push
-  // it negative (see wallets migration comment).
-  const stillHeld = originalLedgerEntry?.hold_until != null;
-
   const referral = await db.transaction().execute(async (trx) => {
+    // Read and lock the original credit inside the clawback transaction: a hold-release committing
+    // between a bare read and the debit would otherwise make us debit the wrong bucket.
+    const originalLedgerEntry = await trx
+      .selectFrom('coin_ledger')
+      .select(['id', 'hold_until'])
+      .where('ref_type', '=', 'earning_event')
+      .where('ref_id', '=', original.id)
+      .where('entry_type', '=', 'OFFERWALL_CREDIT')
+      .forUpdate()
+      .executeTakeFirst();
+    // Still-held coin lives in pending_coin (CHECK(pending_coin >= 0) — a legitimate reversal never
+    // exceeds what's still held there); once released to available_coin, clawbacks are allowed to push
+    // it negative (see wallets migration comment).
+    const stillHeld = originalLedgerEntry?.hold_until != null;
+
     await debitInTransaction(trx, {
       userId: original.user_id,
       entryType: 'OFFERWALL_CLAWBACK',
@@ -152,6 +158,14 @@ async function processReversal(
       refId: original.id,
       idempotencyKey: `${network}:${normalized.networkTxId}:clawback`,
     });
+    if (originalLedgerEntry && stillHeld) {
+      // The held coin is gone — clear the hold so the release sweep never moves it to available.
+      await trx
+        .updateTable('coin_ledger')
+        .set({ hold_until: null })
+        .where('id', '=', originalLedgerEntry.id)
+        .execute();
+    }
     await trx
       .updateTable('earning_events')
       .set({ status: 'clawed_back' })
@@ -228,7 +242,7 @@ export async function processPostback(
 
     const user = await db
       .selectFrom('users')
-      .select(['id', 'region_id', 'trust_level'])
+      .select(['id', 'region_id', 'trust_level', 'status'])
       .where('id', '=', normalized.userId)
       .executeTakeFirst();
     if (!user) {
