@@ -1,4 +1,5 @@
 import {
+  CreateBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
@@ -7,7 +8,7 @@ import {
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
 
-// S3-compatible object storage (AWS S3, Cloudflare R2, MinIO) for covers and raw import files.
+// S3-compatible object storage (AWS S3, Cloudflare R2, SeaweedFS) for covers and raw import files.
 export interface ObjectStorage {
   put(key: string, body: Buffer, contentType: string): Promise<void>;
   get(key: string): Promise<Buffer>;
@@ -38,16 +39,29 @@ class S3ObjectStorage implements ObjectStorage {
   }
 
   async put(key: string, body: Buffer, contentType: string): Promise<void> {
-    await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-        Body: body,
-        ContentType: contentType,
-        // Keys are content-addressed by a fresh uuid, so objects never change once written.
-        CacheControl: 'public, max-age=31536000, immutable',
-      }),
-    );
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+      // Keys are content-addressed by a fresh uuid, so objects never change once written.
+      CacheControl: 'public, max-age=31536000, immutable',
+    });
+    try {
+      await this.client.send(command);
+    } catch (err) {
+      // A fresh self-hosted store (SeaweedFS in docker-compose) starts without the bucket. Managed
+      // buckets (S3/R2) already exist, so this path never runs there.
+      if (!(err instanceof Error) || err.name !== 'NoSuchBucket') throw err;
+      await this.client
+        .send(new CreateBucketCommand({ Bucket: this.bucket }))
+        .catch((createErr: unknown) => {
+          if (!(createErr instanceof Error) || createErr.name !== 'BucketAlreadyOwnedByYou') {
+            throw createErr;
+          }
+        });
+      await this.client.send(command);
+    }
   }
 
   async get(key: string): Promise<Buffer> {

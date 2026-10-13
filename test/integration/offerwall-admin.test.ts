@@ -223,9 +223,7 @@ describe('offerwall CMS management', () => {
       expect(Number(provider.high_value_threshold_usd)).toBeGreaterThan(0);
       expect(provider.high_value_hold_hours).toBeGreaterThanOrEqual(provider.hold_hours);
       expect(typeof provider.credit_immediately).toBe('boolean');
-      expect(provider.callback_url).toBe(
-        `https://api.ainovel.com/postback/${provider.provider}`,
-      );
+      expect(provider.callback_url).toBe(`https://api.ainovel.com/postback/${provider.provider}`);
     }
     const tapjoyProvider = providers.find((provider) => provider.provider === 'tapjoy');
     if (!tapjoyProvider) throw new Error('Tapjoy provider missing');
@@ -240,20 +238,16 @@ describe('offerwall CMS management', () => {
       method: 'PATCH',
       url: '/admin/offerwall/providers/tapjoy',
       headers: adminHeaders(superadminId),
+      // Hold values are deliberately not sent: postback.test.ts changes them temporarily in parallel,
+      // and echoing back a value read mid-change would make it permanent.
       payload: {
         display_name: tapjoyBefore.display_name,
-        hold_hours: tapjoyProvider.hold_hours,
-        high_value_threshold_usd: Number(tapjoyProvider.high_value_threshold_usd),
-        high_value_hold_hours: tapjoyProvider.high_value_hold_hours,
         credit_immediately: nextCreditImmediately,
       },
     });
     expect(updated.statusCode).toBe(200);
     expect(updated.json<ProviderBody>()).toMatchObject({
       provider: 'tapjoy',
-      hold_hours: tapjoyProvider.hold_hours,
-      high_value_threshold_usd: tapjoyProvider.high_value_threshold_usd,
-      high_value_hold_hours: tapjoyProvider.high_value_hold_hours,
       credit_immediately: nextCreditImmediately,
     });
 

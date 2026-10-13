@@ -44,7 +44,7 @@ const EnvSchema = Type.Object({
   // SSV callbacks may credit. Google signs SSV for every publisher with the same keys, so without
   // this list any AdMob app can aim its callback at us. Read through `admobAllowedAdUnits()`.
   ADMOB_ALLOWED_AD_UNITS: Type.Optional(Type.String()),
-  // S3-compatible object storage (AWS S3, Cloudflare R2, MinIO) for novel covers and import files.
+  // S3-compatible object storage (AWS S3, Cloudflare R2, SeaweedFS) for novel covers and import files.
   // Optional so dev/test can boot without it; upload endpoints fail with 503 until configured.
   S3_ENDPOINT: Type.Optional(Type.String()),
   S3_REGION: Type.Optional(Type.String()),
