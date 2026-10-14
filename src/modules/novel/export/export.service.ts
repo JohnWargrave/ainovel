@@ -75,6 +75,9 @@ function metadata({ novel, categories }: Loaded): Record<string, unknown> {
     vip_from_chapter: novel.vip_from_chapter,
     default_unlock_coin: novel.default_unlock_coin,
     allow_ad_unlock: novel.allow_ad_unlock,
+    rating: novel.rating === null ? null : Number(novel.rating),
+    ai_generated: novel.ai_generated,
+    editor_reviewed: novel.editor_reviewed,
   };
 }
 

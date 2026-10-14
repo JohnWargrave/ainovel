@@ -844,11 +844,20 @@ Quy ước chung cho mọi endpoint trong mục 4:
   ],
   "chapter_count": 1648,
   "word_count": 5300000,
-  "updated_at": "2026-10-12T08:15:00.000Z"
+  "updated_at": "2026-10-12T08:15:00.000Z",
+  "language": "vi",
+  "rating": 4.8,
+  "read_count": 1200000,
+  "ai_generated": true,
+  "editor_reviewed": true
 }
 ```
 
 - `author`, `cover_url`, `description` có thể `null`.
+- `language`: ngôn ngữ gốc của truyện (ISO 639-1, ví dụ `vi`, `en`, `zh`).
+- `rating`: điểm 0–5 (1 chữ số thập phân) do biên tập viên nhập trong CMS; `null` = chưa chấm, ẩn sao.
+- `read_count`: số người đọc khác nhau đã mở ít nhất một chương (tăng khi user mở chương đầu tiên của truyện).
+- `ai_generated` / `editor_reviewed`: hiển thị nhãn "AI-generated · editor reviewed".
 - `completion_status`: `ongoing` | `completed` | `hiatus`.
 - `categories` chỉ gồm thể loại đang active, đã sắp theo `sort_order`.
 - `chapter_count`, `word_count` là số tổng do server tính; `updated_at` là ISO-8601 UTC.
@@ -970,9 +979,13 @@ Response `200` (= `NovelSummary` + các field sau):
   "chapter_count": 1648,
   "word_count": 5300000,
   "updated_at": "2026-10-12T08:15:00.000Z",
+  "language": "vi",
+  "rating": 4.8,
+  "read_count": 1200000,
+  "ai_generated": false,
+  "editor_reviewed": false,
   "alt_titles": ["Battle Through the Heavens"],
   "translator": "Nhóm dịch ABC",
-  "language": "vi",
   "vip_from_chapter": 101,
   "default_unlock_coin": 50,
   "allow_ad_unlock": true,

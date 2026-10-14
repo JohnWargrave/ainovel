@@ -409,6 +409,10 @@ interface NovelsTable {
   chapter_count: Generated<number>;
   word_count: GeneratedBigint;
   search_text: Generated<string>;
+  rating: Numeric | null;
+  read_count: GeneratedBigint;
+  ai_generated: Generated<boolean>;
+  editor_reviewed: Generated<boolean>;
   published_at: Timestamp | null;
   created_by: string | null;
   created_at: GeneratedTimestamp;

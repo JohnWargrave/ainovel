@@ -42,6 +42,11 @@ const SUMMARY_COLUMNS = [
   'novels.chapter_count',
   'novels.word_count',
   'novels.updated_at',
+  'novels.language',
+  'novels.rating',
+  'novels.read_count',
+  'novels.ai_generated',
+  'novels.editor_reviewed',
 ] as const;
 
 interface SummaryRow {
@@ -56,6 +61,11 @@ interface SummaryRow {
   chapter_count: number;
   word_count: string;
   updated_at: Date;
+  language: string;
+  rating: string | null;
+  read_count: string;
+  ai_generated: boolean;
+  editor_reviewed: boolean;
 }
 
 async function toSummaries(rows: readonly SummaryRow[]): Promise<NovelSummary[]> {
@@ -92,6 +102,11 @@ async function toSummaries(rows: readonly SummaryRow[]): Promise<NovelSummary[]>
     chapter_count: row.chapter_count,
     word_count: Number(row.word_count),
     updated_at: new Date(row.updated_at).toISOString(),
+    language: row.language,
+    rating: row.rating === null ? null : Number(row.rating),
+    read_count: Number(row.read_count),
+    ai_generated: row.ai_generated,
+    editor_reviewed: row.editor_reviewed,
   }));
 }
 
@@ -249,7 +264,6 @@ export async function getHome(userId: string): Promise<{
 interface VisibleNovel extends SummaryRow {
   alt_titles: string[];
   translator: string | null;
-  language: string;
   vip_from_chapter: number | null;
   default_unlock_coin: number;
   allow_ad_unlock: boolean;
@@ -262,7 +276,6 @@ async function findVisibleNovel(reader: Reader, novelId: string): Promise<Visibl
       ...SUMMARY_COLUMNS,
       'novels.alt_titles',
       'novels.translator',
-      'novels.language',
       'novels.vip_from_chapter',
       'novels.default_unlock_coin',
       'novels.allow_ad_unlock',
@@ -289,7 +302,6 @@ export async function getNovel(userId: string, novelId: string): Promise<NovelDe
     ...summary,
     alt_titles: novel.alt_titles,
     translator: novel.translator,
-    language: novel.language,
     vip_from_chapter: novel.vip_from_chapter,
     default_unlock_coin: novel.default_unlock_coin,
     allow_ad_unlock: novel.allow_ad_unlock,
@@ -406,7 +418,7 @@ export async function readChapter(
   ]);
 
   // Opening a chapter is the reliable "where did I stop" signal — heartbeats may never arrive.
-  await db
+  const opened = await db
     .insertInto('novel_library')
     .values({
       user_id: reader.id,
@@ -423,7 +435,17 @@ export async function readChapter(
         updated_at: now,
       }),
     )
-    .execute();
+    // xmax is 0 only on a freshly inserted row, so this is "first chapter this reader has opened".
+    .returning(sql<boolean>`xmax = 0`.as('inserted'))
+    .executeTakeFirstOrThrow();
+  if (opened.inserted) {
+    // updated_at deliberately untouched: it orders "recently updated", which means new content.
+    await db
+      .updateTable('novels')
+      .set({ read_count: sql`read_count + 1` })
+      .where('id', '=', novelId)
+      .execute();
+  }
 
   return {
     id: chapter.id,

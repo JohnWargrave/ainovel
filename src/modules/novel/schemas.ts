@@ -55,6 +55,14 @@ export const NovelSummarySchema = Type.Object({
   chapter_count: Type.Integer(),
   word_count: Type.Integer(),
   updated_at: Type.String(),
+  // Original language of the text (ISO 639-1, e.g. "vi", "en").
+  language: Type.String(),
+  // Editor-entered 0–5 score; null when not rated (hide the stars).
+  rating: Type.Union([Type.Number(), Type.Null()]),
+  // Distinct readers who have opened a chapter.
+  read_count: Type.Integer(),
+  ai_generated: Type.Boolean(),
+  editor_reviewed: Type.Boolean(),
 });
 export type NovelSummary = Static<typeof NovelSummarySchema>;
 
@@ -87,7 +95,6 @@ export const NovelDetailSchema = Type.Composite([
   Type.Object({
     alt_titles: Type.Array(Type.String()),
     translator: Nullable(Type.String()),
-    language: Type.String(),
     vip_from_chapter: Type.Union([Type.Integer(), Type.Null()]),
     default_unlock_coin: Type.Integer(),
     allow_ad_unlock: Type.Boolean(),

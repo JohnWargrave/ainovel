@@ -48,6 +48,12 @@ export interface AdminNovel {
   vip_from_chapter: number | null;
   default_unlock_coin: number;
   allow_ad_unlock: boolean;
+  // 0–5, null = not rated (the app hides the stars).
+  rating: number | null;
+  // Distinct readers who have opened a chapter. Read-only.
+  read_count: number;
+  ai_generated: boolean;
+  editor_reviewed: boolean;
   // Published chapters readers can see; total includes drafts.
   chapter_count: number;
   total_chapter_count: number;
@@ -93,6 +99,9 @@ export interface NovelInput {
   default_unlock_coin: number;
   allow_ad_unlock: boolean;
   category_ids: string[];
+  rating: number | null;
+  ai_generated: boolean;
+  editor_reviewed: boolean;
 }
 
 export type BulkNovelActionName =
