@@ -1714,7 +1714,15 @@ Lỗi:
 
 ## 8. Nhiệm vụ
 
-Danh sách nhiệm vụ lấy từ config region (`region_config.features.tasks`). Mỗi nhiệm vụ claim được **1 lần/ngày**, reset lúc 00:00 theo timezone của region. Claim là **tự khai báo**: client gửi "tôi đã làm" và server trả coin, không kiểm tra hành động thật. Nhiệm vụ loại `watch_ad` bị server lọc bỏ (ad đã được trả qua SSV).
+Danh sách nhiệm vụ lấy từ config region (`region_config.features.tasks`). Mỗi nhiệm vụ claim được **1 lần/ngày**, reset lúc 00:00 theo timezone của region. Có hai nhóm:
+
+- **Nhiệm vụ có tiến độ** (server tự đo, chỉ claim được khi `progress >= target`):
+  - `read_minutes`: số phút đọc hôm nay (thời gian đọc do server đo qua `POST /novels/read-heartbeat`); `target` là số phút.
+  - `finish_chapters`: số chương đã hoàn thành hôm nay (đủ thời gian + cuộn tới cuối, kể cả chương VIP đã mở).
+  - `watch_videos`: số rewarded ad đã được SSV xác nhận hôm nay, mọi placement.
+- **Nhiệm vụ một lần** (`invite_friend`, `share_app`, `daily_login`): claim là **tự khai báo**: client gửi "tôi đã làm" và server trả coin, không kiểm tra hành động thật.
+
+Nhiệm vụ loại `watch_ad` (một lần, tự khai báo) bị server lọc bỏ vì ad đã được trả qua SSV.
 
 ### `GET /earning/tasks`
 
@@ -1743,9 +1751,15 @@ Response `200`:
 }
 ```
 
-- `task_type`: `watch_ad` | `invite_friend` | `share_app` | `daily_login`. Trong thực tế không có `watch_ad` vì đã bị lọc.
-- `status`: `"available"` hoặc `"completed"`, tương ứng `completed_today`.
-- `progress` là 0 hoặc 1, `target` luôn là 1 (để dành cho nhiệm vụ nhiều bước sau này).
+- `task_type`: `invite_friend` | `share_app` | `daily_login` | `read_minutes` | `finish_chapters` | `watch_videos`. (`watch_ad` không bao giờ xuất hiện vì đã bị lọc.)
+- `status`:
+  - `"in_progress"`: nhiệm vụ có tiến độ chưa đạt `target`; nút claim bị khoá (UI hiện "Go"/"Watch").
+  - `"available"`: claim được.
+  - `"completed"`: đã claim hôm nay (= `completed_today`).
+- `progress` / `target`:
+  - Nhiệm vụ có tiến độ: `progress` là giá trị hôm nay, đã kẹp tối đa bằng `target`. Ví dụ "Read for 10 minutes" → `progress: 6, target: 10`.
+  - Nhiệm vụ một lần: `progress` là 0 hoặc 1, `target` = 1.
+  - Tiến độ không tự claim: app vẫn gọi `POST /earning/tasks/claim` khi `status = "available"`.
 - `icon_url`, `action` có thể `null`. Khi null, app dùng icon hoặc fallback có sẵn. `action` là deep link trong app (ví dụ `ainovel://spin`), không phải URL HTTP.
 - `reward_coin` là number.
 
@@ -1787,6 +1801,7 @@ Lỗi:
 - `403 EARNING_BLOCKED` / `403 EARNING_SUSPENDED`.
 - `404 FEATURE_DISABLED`: region chưa bật tasks.
 - `404 NOT_FOUND`: `task_id` không tồn tại, hoặc là task `watch_ad`.
+- `409 TASK_NOT_COMPLETE`: nhiệm vụ có tiến độ chưa đạt `target`.
 - `409 ALREADY_CLAIMED`: task đã hoàn thành hôm nay.
 - `429 RATE_LIMITED` / `429 UNBACKED_CAP_EXCEEDED` / `429 MINT_PAUSED`.
 

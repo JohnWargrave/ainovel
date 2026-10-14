@@ -35,6 +35,7 @@ const DATA_TABLES = [
   'novel_import_chapters',
   'novel_import_jobs',
   'novel_read_progress',
+  'novel_read_daily',
   'novel_chapter_unlocks',
   'novel_library',
   'novel_chapter_revisions',

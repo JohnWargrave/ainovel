@@ -2,7 +2,7 @@ import { uuidv7 } from 'uuidv7';
 import type { Transaction } from 'kysely';
 import { db } from '../../db/index.js';
 import type { DB } from '../../db/types.js';
-import { dayWindow } from '../../lib/day-window.js';
+import { dayKey, dayWindow } from '../../lib/day-window.js';
 import { lockRedis } from '../../redis/index.js';
 import { creditInTransaction } from '../wallet-ledger/ledger.service.js';
 import { recordMint } from '../wallet-ledger/economy-counters.js';
@@ -149,6 +149,31 @@ export async function recordReadHeartbeat(
     }
     const scrollRatio = Math.max(Number(row.max_scroll_ratio), body.scroll_ratio);
     const complete = readTimeS >= requiredS && scrollRatio >= feature.completion_scroll_ratio;
+    const gainedS = readTimeS - row.read_time_s;
+    const newlyCompleted = complete && row.completed_at === null;
+    if (gainedS > 0 || newlyCompleted) {
+      // Daily totals for the progress tasks, keyed on the region-local day like every daily reset.
+      await trx
+        .insertInto('novel_read_daily')
+        .values({
+          user_id: userId,
+          day: dayKey(timezone, now),
+          read_seconds: gainedS,
+          chapters_completed: newlyCompleted ? 1 : 0,
+        })
+        .onConflict((oc) =>
+          oc.columns(['user_id', 'day']).doUpdateSet((eb) => ({
+            read_seconds: eb('novel_read_daily.read_seconds', '+', gainedS),
+            chapters_completed: eb(
+              'novel_read_daily.chapters_completed',
+              '+',
+              newlyCompleted ? 1 : 0,
+            ),
+            updated_at: now,
+          })),
+        )
+        .execute();
+    }
 
     await trx
       .updateTable('novel_read_progress')
@@ -156,7 +181,7 @@ export async function recordReadHeartbeat(
         read_time_s: readTimeS,
         max_scroll_ratio: scrollRatio.toFixed(3),
         last_heartbeat_at: now,
-        ...(complete && row.completed_at === null ? { completed_at: now } : {}),
+        ...(newlyCompleted ? { completed_at: now } : {}),
       })
       .where('id', '=', row.id)
       .execute();

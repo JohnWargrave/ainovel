@@ -481,6 +481,16 @@ interface UserBoostsTable {
   created_at: GeneratedTimestamp;
 }
 
+// Region-local daily reading totals for the progress tasks — see migration 1700000000071.
+interface NovelReadDailyTable {
+  user_id: string;
+  // Written and compared as the YYYY-MM-DD region-local day key; node-pg reads a DATE back as a Date.
+  day: ColumnType<Date | string, string, string>;
+  read_seconds: Generated<number>;
+  chapters_completed: Generated<number>;
+  updated_at: GeneratedTimestamp;
+}
+
 interface NovelLibraryTable {
   user_id: string;
   novel_id: string;
@@ -625,6 +635,7 @@ export interface DB {
   novel_chapter_revisions: NovelChapterRevisionsTable;
   novel_chapter_unlocks: NovelChapterUnlocksTable;
   novel_read_progress: NovelReadProgressTable;
+  novel_read_daily: NovelReadDailyTable;
   novel_library: NovelLibraryTable;
   novel_import_jobs: NovelImportJobsTable;
   novel_import_chapters: NovelImportChaptersTable;

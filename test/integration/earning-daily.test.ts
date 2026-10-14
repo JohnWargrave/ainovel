@@ -59,7 +59,7 @@ interface TaskListBody {
     completed_today: boolean;
     icon_url: string | null;
     action: string | null;
-    status: 'available' | 'completed';
+    status: 'available' | 'in_progress' | 'completed';
     progress: number;
     target: number;
   }[];
@@ -528,6 +528,87 @@ describe('daily earning (check-in + tasks)', () => {
       progress: 0,
       target: 1,
     });
+  });
+
+  it('pays progress tasks only once the measured progress reaches the target', async () => {
+    const progressTasks = [
+      {
+        id: 'read_10',
+        title: 'Read for 10 minutes',
+        description: 'Read any story',
+        reward_coin: 30,
+        task_type: 'read_minutes',
+        target: 10,
+      },
+      {
+        id: 'finish_3',
+        title: 'Finish 3 chapters',
+        description: 'Finish chapters',
+        reward_coin: 40,
+        task_type: 'finish_chapters',
+        target: 3,
+      },
+      {
+        id: 'videos_3',
+        title: 'Watch 3 videos',
+        description: 'Watch videos',
+        reward_coin: 15,
+        task_type: 'watch_videos',
+        target: 3,
+      },
+    ];
+    const userId = await createUser(
+      await enabledRegion({ tasks: { enabled: true, list: progressTasks } }),
+    );
+    const today = new Date().toISOString().slice(0, 10);
+    await db
+      .insertInto('novel_read_daily')
+      .values({ user_id: userId, day: today, read_seconds: 6 * 60 + 59, chapters_completed: 3 })
+      .execute();
+    // One verified view today, one from yesterday that must not count, one still pending.
+    for (const [status, consumedAt] of [
+      ['consumed', new Date()],
+      ['consumed', new Date(Date.now() - 2 * DAY_MS)],
+      ['pending', null],
+    ] as const) {
+      await db
+        .insertInto('rewarded_ad_intents')
+        .values({
+          id: uuidv7(),
+          user_id: userId,
+          region_id: 'VN',
+          status,
+          placement: 'earncoin',
+          consumed_at: consumedAt,
+          expires_at: new Date(Date.now() + 10 * 60 * 1000),
+        })
+        .execute();
+    }
+
+    const list = await app.inject({ method: 'GET', url: '/earning/tasks', headers: auth(userId) });
+    expect(list.statusCode).toBe(200);
+    const byId = new Map(list.json<TaskListBody>().tasks.map((task) => [task.id, task]));
+    expect(byId.get('read_10')).toMatchObject({ status: 'in_progress', progress: 6, target: 10 });
+    expect(byId.get('finish_3')).toMatchObject({ status: 'available', progress: 3, target: 3 });
+    expect(byId.get('videos_3')).toMatchObject({ status: 'in_progress', progress: 1, target: 3 });
+
+    const early = await app.inject({
+      method: 'POST',
+      url: '/earning/tasks/claim',
+      headers: auth(userId),
+      payload: { task_id: 'read_10' },
+    });
+    expect(early.statusCode).toBe(409);
+    expect(early.json<ErrorResponseBody>().error.code).toBe('TASK_NOT_COMPLETE');
+
+    const done = await app.inject({
+      method: 'POST',
+      url: '/earning/tasks/claim',
+      headers: auth(userId),
+      payload: { task_id: 'finish_3' },
+    });
+    expect(done.statusCode).toBe(200);
+    expect(done.json<TaskClaimBody>().credited_coin).toBe(40);
   });
 
   it('exposes icon and action from config, defaulting to null', async () => {

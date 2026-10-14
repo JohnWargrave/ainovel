@@ -265,6 +265,15 @@ describe('novel reading and unlocks', () => {
       const again = await beat(userId, chapterId);
       expect(again.rewarded).toBe(false);
       expect(await creditRows(userId)).toEqual([{ entry_type: 'NOVEL_READ_CREDIT', amount: '10' }]);
+
+      // Daily totals for the progress tasks: 90s read across the beats, one chapter finished.
+      const daily = await db
+        .selectFrom('novel_read_daily')
+        .select(['read_seconds', 'chapters_completed'])
+        .where('user_id', '=', userId)
+        .where('day', '=', '2026-08-19')
+        .execute();
+      expect(daily).toEqual([{ read_seconds: 90, chapters_completed: 1 }]);
     });
 
     it('multiplies the chapter reward while a boost is running', async () => {

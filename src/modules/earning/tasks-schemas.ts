@@ -17,6 +17,10 @@ export const TaskItemSchema = Type.Object({
     Type.Literal('invite_friend'),
     Type.Literal('share_app'),
     Type.Literal('daily_login'),
+    // Server-measured progress tasks: claimable only once progress reaches target.
+    Type.Literal('read_minutes'),
+    Type.Literal('finish_chapters'),
+    Type.Literal('watch_videos'),
   ]),
   // Icon and destination come from region_config so they can be changed without a release; null when
   // a task predates them, which the app renders with its own bundled fallback.
@@ -24,10 +28,14 @@ export const TaskItemSchema = Type.Object({
   // In-app destination for the task's CTA, e.g. "ainovel://spin". Not an HTTP URL — the backend
   // never sends the app somewhere outside itself for a task.
   action: Type.Union([Type.String(), Type.Null()]),
-  status: Type.Union([Type.Literal('available'), Type.Literal('completed')]),
-  // Every task today is a single-shot daily claim, so progress is 0 or 1 against a target of 1.
-  // Present so the app can render one progress component for all tasks, and so multi-step tasks can
-  // arrive later without a breaking response change.
+  // in_progress: a progress task still short of its target (not claimable yet).
+  status: Type.Union([
+    Type.Literal('available'),
+    Type.Literal('in_progress'),
+    Type.Literal('completed'),
+  ]),
+  // Progress tasks report today's measured value (capped at target): minutes read, chapters
+  // finished, or verified ad views. Single-shot tasks are 0 or 1 against a target of 1.
   progress: Type.Number(),
   target: Type.Number(),
 });
