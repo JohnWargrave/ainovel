@@ -117,6 +117,8 @@ export const LoginRewardOffersResponseSchema = Type.Object({
       total_coin: Type.Integer({ minimum: 0 }),
     }),
   ),
+  // link_required: a guest's welcome bonus waits until they link an account — show it as pending.
+  welcome_mode: Type.Union([Type.Literal('instant'), Type.Literal('link_required')]),
   updated_at: Type.String(),
 });
 
@@ -152,5 +154,12 @@ export const MeResponseSchema = Type.Object({
     Type.Object({ multiplier: Type.Integer(), expires_at: Type.String() }),
     Type.Null(),
   ]),
+  // The one-time welcome bonus: its amount, whether this account has received it, and the mode
+  // (under link_required a guest receives it by linking an account).
+  welcome: Type.Object({
+    coin: Type.Integer(),
+    claimed: Type.Boolean(),
+    mode: Type.Union([Type.Literal('instant'), Type.Literal('link_required')]),
+  }),
 });
 export type MeResponse = Static<typeof MeResponseSchema>;

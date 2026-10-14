@@ -5,7 +5,7 @@ import ipaddr from 'ipaddr.js';
 import type { JWT } from '@fastify/jwt';
 import type { Transaction } from 'kysely';
 import { db } from '../../db/index.js';
-import type { DB } from '../../db/types.js';
+import type { DB, WelcomeMode } from '../../db/types.js';
 import { AppError } from '../../lib/errors.js';
 import { displayName } from '../../lib/display-name.js';
 import { checkSubjectRateLimit } from '../../lib/rate-limit.js';
@@ -22,7 +22,10 @@ import { issueTokenPair, type SessionContext, type TokenPair } from './jwt.js';
 import type { AuthProviders } from './ports.js';
 import type { AuthEmailSender } from './auth-email.js';
 import { recordAuthEvent, type AuthEventContext } from './auth-events.js';
-import { getCoinRewardSettingsInTransaction } from '../config/coin-reward-settings.service.js';
+import {
+  getCoinRewardSettings,
+  getCoinRewardSettingsInTransaction,
+} from '../config/coin-reward-settings.service.js';
 import { activeBoost, type ActiveBoost } from '../spin/boost.service.js';
 
 const RECOVER_RATE_LIMIT_WINDOW_S = 3_600;
@@ -163,6 +166,12 @@ async function ensureRewardCreditInTransaction(
   });
 }
 
+// Under link_required a guest's welcome bonus waits for their first bind; the bind calls back into
+// ensureAuthCreditsInTransaction with the bound provider and pays it then.
+export function isWelcomeDeferred(mode: WelcomeMode, provider: string): boolean {
+  return mode === 'link_required' && provider === 'guest';
+}
+
 async function ensureAuthCreditsInTransaction(
   trx: Transaction<DB>,
   userId: string,
@@ -181,12 +190,9 @@ async function ensureAuthCreditsInTransaction(
   }
 
   const settings = await getCoinRewardSettingsInTransaction(trx);
-  const welcome = await ensureRewardCreditInTransaction(
-    trx,
-    userId,
-    'WELCOME_CREDIT',
-    settings.welcome_coin,
-  );
+  const welcome = isWelcomeDeferred(settings.welcome_mode, provider)
+    ? EMPTY_AUTH_CREDIT
+    : await ensureRewardCreditInTransaction(trx, userId, 'WELCOME_CREDIT', settings.welcome_coin);
   const google =
     provider === 'google'
       ? await ensureRewardCreditInTransaction(
@@ -1262,6 +1268,7 @@ export async function getUserProfile(userId: string): Promise<{
   referral_code: string | null;
   wallet: { available_coin: string; pending_coin: string };
   active_boost: ActiveBoost | null;
+  welcome: { coin: number; claimed: boolean; mode: WelcomeMode };
 }> {
   const row = await db
     .selectFrom('users')
@@ -1297,5 +1304,26 @@ export async function getUserProfile(userId: string): Promise<{
       pending_coin: row.pending_coin,
     },
     active_boost: await activeBoost(db, userId),
+    welcome: await welcomeStatus(userId),
+  };
+}
+
+async function welcomeStatus(
+  userId: string,
+): Promise<{ coin: number; claimed: boolean; mode: WelcomeMode }> {
+  const [settings, credit] = await Promise.all([
+    getCoinRewardSettings(),
+    db
+      .selectFrom('coin_ledger')
+      .select('amount')
+      .where('user_id', '=', userId)
+      .where('entry_type', '=', 'WELCOME_CREDIT')
+      .executeTakeFirst(),
+  ]);
+  return {
+    // What was actually paid once claimed; the current setting while still owed.
+    coin: credit ? Number(credit.amount) : settings.welcome_coin,
+    claimed: credit !== undefined,
+    mode: settings.welcome_mode,
   };
 }

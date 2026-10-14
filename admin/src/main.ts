@@ -2465,6 +2465,13 @@ function renderSettings(
           Google first-login bonus
           <input name="google_login" type="number" min="0" max="10000000" step="1" value="${String(settings?.google_login ?? 0)}" required />
         </label>
+        <label>
+          Guest welcome bonus
+          <select name="welcome_mode">
+            <option value="instant" ${settings?.welcome_mode === 'link_required' ? '' : 'selected'}>Paid on signup</option>
+            <option value="link_required" ${settings?.welcome_mode === 'link_required' ? 'selected' : ''}>Held until the guest links an account</option>
+          </select>
+        </label>
       </div>
       <div class="login-offer-preview">
         <div>
@@ -2538,6 +2545,8 @@ function renderSettings(
           updateCoinRewardSettings({
             welcome_coin: Number(form.get('welcome_coin')),
             google_login: Number(form.get('google_login')),
+            welcome_mode:
+              form.get('welcome_mode') === 'link_required' ? 'link_required' : 'instant',
           }),
         (coinRewardSettings) => ({ coinRewardSettings }),
       );

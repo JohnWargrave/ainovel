@@ -14,6 +14,8 @@ type GeneratedTimestamp = ColumnType<Date, Date | string | undefined, Date | str
 type GeneratedNumeric = ColumnType<string, string | number | undefined, string | number>;
 type GeneratedBigint = ColumnType<string, string | number | undefined, string | number>;
 
+export type WelcomeMode = 'instant' | 'link_required';
+
 export type LedgerEntryType =
   | 'OFFERWALL_CREDIT'
   | 'OFFERWALL_CLAWBACK'
@@ -52,6 +54,7 @@ interface CoinRewardSettingsTable {
   id: string;
   welcome_coin: Generated<number>;
   google_login: Generated<number>;
+  welcome_mode: ColumnType<WelcomeMode, WelcomeMode | undefined, WelcomeMode>;
   updated_at: GeneratedTimestamp;
 }
 

@@ -239,10 +239,14 @@ Response 200:
       "total_coin": 1500
     }
   ],
+  "welcome_mode": "instant",
   "updated_at": "2026-10-01T00:00:00.000Z"
 }
 ```
 
+- `welcome_mode` (CMS cấu hình):
+  - `instant`: mọi tài khoản mới, kể cả guest, nhận `welcome_coin` ngay khi tạo. App hiện màn "Welcome gift".
+  - `link_required`: guest **chưa** nhận `welcome_coin`; coin được cộng khi guest liên kết Google/Facebook (`POST /auth/bind`) hoặc thêm mật khẩu (`POST /auth/password/bind`). App hiện màn "Welcome gift — Pending" với nút "Link Google & claim". Tài khoản tạo thẳng bằng Google/Facebook/mật khẩu vẫn nhận ngay.
 - Coin là integer. Chỉ có 2 item `password` và `google` (không có `facebook`/`guest`; thực tế guest và facebook cũng nhận `welcome_coin`, chỉ Google có `provider_bonus_coin`).
 
 Lỗi:
@@ -269,7 +273,7 @@ Response 200: `AuthResult` (xem trên). Khi khôi phục tài khoản guest có 
 
 Side effects:
 
-- Tài khoản mới: tạo user + ví + device, nhận `welcome_coin` (một lần duy nhất mỗi user), `trust_level` = 0, sinh `referral_code`.
+- Tài khoản mới: tạo user + ví + device, nhận `welcome_coin` (một lần duy nhất mỗi user; khi `welcome_mode = link_required` thì chưa nhận, xem `GET /auth/login-offers`), `trust_level` = 0, sinh `referral_code`.
 - Khôi phục: tìm theo installation id (fallback một lần theo fingerprint GAID+model+os+build_props cho tài khoản cũ), cấp session mới; nếu user chưa từng nhận welcome bonus thì được cộng bù.
 
 Rate limit: 20 req/60s/IP. Khôi phục: 5 lần/giờ/installation. Tạo tài khoản mới: 60/giờ/mạng (/24 IPv4 hoặc /64 IPv6) và 3/24h/GAID.
@@ -693,13 +697,15 @@ Response 200:
   "region_id": "VN",
   "referral_code": "K7Q2MX",
   "wallet": { "available_coin": "1000", "pending_coin": "0" },
-  "active_boost": { "multiplier": 2, "expires_at": "2026-10-14T09:30:00.000Z" }
+  "active_boost": { "multiplier": 2, "expires_at": "2026-10-14T09:30:00.000Z" },
+  "welcome": { "coin": 10000, "claimed": true, "mode": "instant" }
 }
 ```
 
 - `username`: username mật khẩu (lowercase) nếu có; nếu không là tên hiển thị suy ra từ id: `Player_` + 6 ký tự hex cuối của id.
 - `avatar_url`: hiện luôn `null`.
 - `wallet.available_coin` / `pending_coin`: **string** (bigint), parse bằng số nguyên lớn. `pending_coin` là coin đang chờ xác nhận, chưa dùng được.
+- `welcome`: coin chào mừng. `claimed`: tài khoản đã nhận chưa; `coin`: số đã nhận (hoặc số sẽ nhận nếu chưa); `mode`: như `welcome_mode` ở `GET /auth/login-offers`. Khi `!claimed && mode = "link_required"` → hiện banner "Link Google to claim".
 - `active_boost`: boost thưởng đọc đang chạy (giải "×2 boost" của Lucky Spin), hoặc `null`. Trong khoảng này, thưởng đọc chương được nhân `multiplier`.
 
 Lỗi:

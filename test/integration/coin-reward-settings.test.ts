@@ -77,12 +77,18 @@ describe('coin reward settings admin API', () => {
       method: 'PUT',
       url: '/admin/coin-reward-settings',
       headers: adminHeaders(superadminId),
-      payload: { welcome_coin: before.welcome_coin, google_login: before.google_login },
+      // Same values back, so suites signing up guests in parallel are unaffected.
+      payload: {
+        welcome_coin: before.welcome_coin,
+        google_login: before.google_login,
+        welcome_mode: 'instant',
+      },
     });
     expect(put.statusCode).toBe(200);
     expect(put.json<SettingsBody>()).toMatchObject({
       welcome_coin: 10_000,
       google_login: 2_000,
+      welcome_mode: 'instant',
     });
 
     const audit = await db
@@ -93,8 +99,8 @@ describe('coin reward settings admin API', () => {
       .orderBy('id', 'desc')
       .executeTakeFirstOrThrow();
     expect(audit.detail).toMatchObject({
-      before: { welcome_coin: 10_000, google_login: 2_000 },
-      after: { welcome_coin: 10_000, google_login: 2_000 },
+      before: { welcome_coin: 10_000, google_login: 2_000, welcome_mode: 'instant' },
+      after: { welcome_coin: 10_000, google_login: 2_000, welcome_mode: 'instant' },
     });
   });
 
@@ -119,6 +125,7 @@ describe('coin reward settings admin API', () => {
         total_coin: 12_000,
       },
     ]);
+    expect(response.json<{ welcome_mode: string }>().welcome_mode).toBe('instant');
 
     const versioned = await app.inject({
       method: 'GET',
@@ -152,5 +159,13 @@ describe('coin reward settings admin API', () => {
       payload: { welcome_coin: -1, google_login: 2_000 },
     });
     expect(invalid.statusCode).toBe(400);
+
+    const badMode = await app.inject({
+      method: 'PUT',
+      url: '/admin/coin-reward-settings',
+      headers: adminHeaders(superadminId),
+      payload: { welcome_coin: 10_000, google_login: 2_000, welcome_mode: 'later' },
+    });
+    expect(badMode.statusCode).toBe(400);
   });
 });

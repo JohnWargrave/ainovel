@@ -129,9 +129,12 @@ export interface AuditLogEntry {
   created_at: string;
 }
 
+export type WelcomeMode = 'instant' | 'link_required';
+
 export interface CoinRewardSettings {
   welcome_coin: number;
   google_login: number;
+  welcome_mode: WelcomeMode;
   updated_at: string;
 }
 
@@ -645,6 +648,7 @@ export function getCoinRewardSettings(): Promise<CoinRewardSettings> {
 export function updateCoinRewardSettings(input: {
   welcome_coin: number;
   google_login: number;
+  welcome_mode: WelcomeMode;
 }): Promise<CoinRewardSettings> {
   return api<CoinRewardSettings>('/admin/coin-reward-settings', {
     method: 'PUT',

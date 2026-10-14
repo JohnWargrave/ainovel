@@ -101,6 +101,17 @@ describe('auth flow', () => {
     expect(walletRes.statusCode).toBe(200);
     expect(walletRes.json<WalletResponseBody>().available_coin).toBe('10000');
 
+    const me = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: { ...APP_HEADERS, authorization: `Bearer ${body.access}` },
+    });
+    expect(me.json<{ welcome: unknown }>().welcome).toEqual({
+      coin: 10_000,
+      claimed: true,
+      mode: 'instant',
+    });
+
     const users = await db
       .selectFrom('users')
       .selectAll()
