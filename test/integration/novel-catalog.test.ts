@@ -5,6 +5,7 @@ import type { JWT } from '@fastify/jwt';
 import { uuidv7 } from 'uuidv7';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/index.js';
+import { rateLimitRedis } from '../../src/redis/index.js';
 
 // Browsing surfaces the Novelico v3 UI reads: card fields, list totals and filters, the home rows,
 // the locked-chapter preview and the hourly chapter limit.
@@ -253,6 +254,24 @@ describe('novel catalog', () => {
       const text = res.json<LockedBody>().error.preview?.text ?? '';
       expect(text.length).toBeLessThanOrEqual(801);
       expect(text).toMatch(/word…$/);
+    });
+  });
+
+  describe('hourly chapter limit', () => {
+    it('answers with CHAPTER_HOURLY_LIMIT and when the window resets', async () => {
+      const userId = await createUser(await createRegion());
+      const { novelId } = await createNovel({ chapters: 1 });
+      // Stand in for 300 chapters already opened this hour, with 20 minutes of the window left.
+      await rateLimitRedis.set(`novel-chapter-read-hour:ratelimit:${userId}`, 300, 'EX', 1200);
+
+      const before = Date.now();
+      const res = await get(userId, `/novels/${novelId}/chapters/1`);
+      expect(res.statusCode).toBe(429);
+      const error = res.json<{ error: { code: string; retry_at: string } }>().error;
+      expect(error.code).toBe('CHAPTER_HOURLY_LIMIT');
+      const retryIn = Date.parse(error.retry_at) - before;
+      expect(retryIn).toBeGreaterThan(1190_000);
+      expect(retryIn).toBeLessThanOrEqual(1201_000);
     });
   });
 });

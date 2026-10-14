@@ -1143,7 +1143,18 @@ Lỗi:
   `chapter_id` dùng ngay cho `POST /novels/chapters/:id/unlock`; `unlock_price` là giá coin; `ad_unlock` = truyện có cho mở bằng quảng cáo không.
   `preview`: phần mở đầu để hiển thị phía trên popup mở khoá — tiêu đề chương và 2 đoạn đầu (cách nhau bằng `\n\n`), tối đa 800 ký tự; nếu bị cắt thì cắt ở ranh giới từ và kết thúc bằng `…`. Chỉ có ở endpoint này; `CHAPTER_LOCKED` từ heartbeat/unlock không kèm `preview`.
 
-- `429 RATE_LIMITED` — vượt 20 chương/phút hoặc 300 chương/giờ.
+- `429 RATE_LIMITED` — vượt 20 chương/phút (chờ vài giây rồi thử lại).
+- `429 CHAPTER_HOURLY_LIMIT` — vượt 300 chương/giờ. Body có thêm `retry_at` (ISO 8601) — thời điểm được đọc tiếp, dùng cho màn "đọc quá nhanh" với đồng hồ đếm ngược:
+
+  ```json
+  {
+    "error": {
+      "code": "CHAPTER_HOURLY_LIMIT",
+      "message": "…",
+      "retry_at": "2026-10-14T09:20:00.000Z"
+    }
+  }
+  ```
 
 ---
 

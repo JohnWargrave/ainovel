@@ -119,7 +119,13 @@ export function registerNovelRoutes(app: FastifyInstance, deps: Pick<AuthDeps, '
     async (request, reply) => {
       const sub = userId(request);
       await checkSubjectRateLimit('novel-chapter-read-min', sub, 60, CHAPTER_READ_PER_MINUTE);
-      await checkSubjectRateLimit('novel-chapter-read-hour', sub, 3600, CHAPTER_READ_PER_HOUR);
+      await checkSubjectRateLimit(
+        'novel-chapter-read-hour',
+        sub,
+        3600,
+        CHAPTER_READ_PER_HOUR,
+        'CHAPTER_HOURLY_LIMIT',
+      );
       reply.send(await readChapter(sub, request.params.id, request.params.chapter_no));
     },
   );
