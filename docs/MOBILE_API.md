@@ -200,6 +200,7 @@ Object `user` trả về trong các response đăng nhập/đăng ký (`AuthResu
   "refresh": "eyJhbGciOiJIUzI1NiIs...",
   "user": {
     "id": "0192f3a4-7c1e-7b3a-9d2e-4f5a6b7c8d9e",
+    "public_id": "10284731",
     "auth_provider": "guest",
     "trust_level": 0,
     "region_id": "VN",
@@ -211,6 +212,7 @@ Object `user` trả về trong các response đăng nhập/đăng ký (`AuthResu
 ```
 
 - `auth_provider`: `guest` | `google` | `facebook` | `password` (phương thức đăng nhập "chính" hiện tại).
+- `public_id`: ID số để hiển thị ở màn hồ sơ ("ID 10284731") và đọc cho bộ phận hỗ trợ; **string** (bigint), ≥ 8 chữ số, không đổi suốt đời tài khoản. Chỉ để hiển thị — mọi API vẫn dùng `id` (UUID).
 - `country_code`: mã ISO quốc gia theo IP lúc tạo tài khoản (`"XX"` nếu không xác định).
 - `referral_code`: mã giới thiệu của chính user (có thể `null` với tài khoản cũ).
 - Các route này không khai báo response schema nên có thể có thêm field (vd `recovered`). Response KHÔNG chứa số dư ví — gọi `GET /me` để lấy.
@@ -690,6 +692,7 @@ Response 200:
 ```json
 {
   "id": "0192f3a4-7c1e-7b3a-9d2e-4f5a6b7c8d9e",
+  "public_id": "10284731",
   "username": "Player_7c8d9e",
   "avatar_url": null,
   "auth_provider": "guest",
@@ -704,6 +707,7 @@ Response 200:
 
 - `username`: username mật khẩu (lowercase) nếu có; nếu không là tên hiển thị suy ra từ id: `Player_` + 6 ký tự hex cuối của id.
 - `avatar_url`: hiện luôn `null`.
+- `public_id`: như trong response đăng nhập.
 - `wallet.available_coin` / `pending_coin`: **string** (bigint), parse bằng số nguyên lớn. `pending_coin` là coin đang chờ xác nhận, chưa dùng được.
 - `welcome`: coin chào mừng. `claimed`: tài khoản đã nhận chưa; `coin`: số đã nhận (hoặc số sẽ nhận nếu chưa); `mode`: như `welcome_mode` ở `GET /auth/login-offers`. Khi `!claimed && mode = "link_required"` → hiện banner "Link Google to claim".
 - `active_boost`: boost thưởng đọc đang chạy (giải "×2 boost" của Lucky Spin), hoặc `null`. Trong khoảng này, thưởng đọc chương được nhân `multiplier`.
@@ -713,6 +717,22 @@ Lỗi:
 - `400 VALIDATION_ERROR` — thiếu header.
 - `401 UNAUTHORIZED` / `INVALID_ACCESS_TOKEN` / `SESSION_REVOKED`.
 - `404 USER_NOT_FOUND`.
+
+### `GET /me/stats`
+
+Ba chỉ số ở màn hồ sơ. **Auth:** Bearer.
+
+Response 200:
+
+```json
+{ "chapters_read": 48, "reading_seconds": 43200, "checkin_streak": 4 }
+```
+
+- `chapters_read`: số chương đã đọc hết (cùng tiêu chí hoàn thành dùng để thưởng chương), tính trên mọi truyện, mọi thời điểm.
+- `reading_seconds`: tổng thời gian đọc do server đo qua heartbeat. App tự định dạng ("12h").
+- `checkin_streak`: số ngày điểm danh liên tiếp, bằng `days_claimed` của `GET /checkin/state`.
+
+Lỗi: chỉ các lỗi chung.
 
 ## 3. Hộp thư (Inbox)
 

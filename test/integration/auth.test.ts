@@ -43,7 +43,7 @@ interface AuthResponseBody {
   access: string;
   refresh: string;
   recovered?: boolean;
-  user: { id: string; auth_provider: string; trust_level: number };
+  user: { id: string; public_id: string; auth_provider: string; trust_level: number };
 }
 
 interface TokenPairBody {
@@ -91,6 +91,7 @@ describe('auth flow', () => {
     expect(body.refresh).toBeTypeOf('string');
     expect(body.user.trust_level).toBe(0);
     expect(body.user.auth_provider).toBe('guest');
+    expect(body.user.public_id).toMatch(/^[1-9]\d{7,}$/);
     expect(body.recovered).toBeUndefined();
 
     const walletRes = await app.inject({
@@ -106,6 +107,7 @@ describe('auth flow', () => {
       url: '/me',
       headers: { ...APP_HEADERS, authorization: `Bearer ${body.access}` },
     });
+    expect(me.json<{ public_id: string }>().public_id).toBe(body.user.public_id);
     expect(me.json<{ welcome: unknown }>().welcome).toEqual({
       coin: 10_000,
       claimed: true,
@@ -148,6 +150,7 @@ describe('auth flow', () => {
     expect(second.statusCode).toBe(200);
     const secondBody = second.json<AuthResponseBody>();
     expect(secondBody.user.id).toBe(firstBody.user.id);
+    expect(secondBody.user.public_id).toBe(firstBody.user.public_id);
     expect(secondBody.recovered).toBe(true);
     // A fresh refresh token is issued (access tokens are claim-identical within the same second).
     expect(secondBody.refresh).not.toBe(firstBody.refresh);

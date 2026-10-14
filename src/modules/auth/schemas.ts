@@ -140,6 +140,8 @@ export const ActiveSessionsResponseSchema = Type.Object({ items: Type.Array(Acti
 
 export const MeResponseSchema = Type.Object({
   id: Type.String(),
+  // Display-only numeric ID ("ID 10284731"), as a string like other BIGINTs.
+  public_id: Type.String(),
   username: Type.String(),
   avatar_url: Type.Union([Type.String(), Type.Null()]),
   auth_provider: Type.String(),

@@ -93,6 +93,11 @@ async function computeCheckinState(userId: string, now = new Date()): Promise<Ch
   };
 }
 
+// Consecutive region-local days claimed up to today (or yesterday while today is still open).
+export async function checkinStreak(userId: string): Promise<number> {
+  return (await computeCheckinState(userId)).daysClaimed;
+}
+
 export async function getCheckinState(userId: string): Promise<CheckinStateResponse> {
   const state = await computeCheckinState(userId);
   // Unlike claim, state does not 404 on a disabled region: the app calls this to decide whether to

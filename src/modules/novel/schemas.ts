@@ -196,6 +196,16 @@ export const UnlockResponseSchema = Type.Object({
 });
 export type UnlockResponse = Static<typeof UnlockResponseSchema>;
 
+export const ReadingStatsResponseSchema = Type.Object({
+  // Chapters read to the end (the same completion that earns the chapter reward).
+  chapters_read: Type.Integer(),
+  // Server-measured reading time, summed over every chapter.
+  reading_seconds: Type.Integer(),
+  // Consecutive days of check-in, as days_claimed in GET /checkin/state.
+  checkin_streak: Type.Integer(),
+});
+export type ReadingStatsResponse = Static<typeof ReadingStatsResponseSchema>;
+
 export const LibraryQuerySchema = Type.Object({
   view: Type.Optional(Type.Union([Type.Literal('bookshelf'), Type.Literal('history')])),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),

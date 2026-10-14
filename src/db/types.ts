@@ -146,6 +146,8 @@ interface UsersTable {
   referred_by_set_at: Timestamp | null;
   referred_ip: string | null;
   referral_qualified_at: Timestamp | null;
+  // BIGINT from users_public_id_seq; display-only numeric ID.
+  public_id: Generated<string>;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
 }

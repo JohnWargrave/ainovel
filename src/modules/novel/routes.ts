@@ -19,6 +19,7 @@ import {
   ReadChapterParamsSchema,
   ReadHeartbeatBodySchema,
   ReadHeartbeatResponseSchema,
+  ReadingStatsResponseSchema,
   UnlockBodySchema,
   UnlockResponseSchema,
   type ChapterParams,
@@ -41,6 +42,7 @@ import {
   setBookshelf,
 } from './novel.service.js';
 import { recordReadHeartbeat } from './reading.service.js';
+import { getReadingStats } from './reader-stats.service.js';
 import { unlockChapter } from './unlock.service.js';
 
 // Chapter bodies are the product: these budgets are what stops one account from scraping a whole
@@ -158,6 +160,14 @@ export function registerNovelRoutes(app: FastifyInstance, deps: Pick<AuthDeps, '
       // A ~10s beat is 6/min; 20 leaves room for retries and chapter switches.
       await checkSubjectRateLimit('novel-read-heartbeat', sub, 60, 20);
       reply.send(await recordReadHeartbeat(sub, request.body));
+    },
+  );
+
+  app.get(
+    '/me/stats',
+    { preHandler: authGuard, schema: { response: { 200: ReadingStatsResponseSchema } } },
+    async (request, reply) => {
+      reply.send(await getReadingStats(userId(request)));
     },
   );
 
