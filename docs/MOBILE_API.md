@@ -2524,3 +2524,43 @@ Lỗi:
 
 - `400 VALIDATION_ERROR` — `rating` ngoài 1–5, `message` quá dài, `email` sai định dạng.
 - `429 RATE_LIMITED` — quá 5 lần/giờ.
+
+### `POST /reports`
+
+Báo cáo nội dung (truyện, chương) hoặc sự cố app từ màn "Report a problem". **Auth:** Bearer. **Rate limit:** 10 lần/giờ/user.
+
+Body:
+
+| Field         | Kiểu   | Bắt buộc | Ràng buộc                                                                                                          |
+| ------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `target_type` | string | có       | `novel` \| `chapter` \| `app`                                                                                      |
+| `target_id`   | string | tuỳ loại | UUID. **Bắt buộc** với `novel` (id truyện) và `chapter` (`id` UUID của chương trong mục lục); bị bỏ qua với `app`. |
+| `reason`      | string | có       | `inappropriate` \| `copyright` \| `wrong_content` \| `spam` \| `other`                                             |
+| `message`     | string | không    | ≤ 2000 ký tự                                                                                                       |
+
+```json
+{
+  "target_type": "chapter",
+  "target_id": "0192f7b1-aaaa-7bbb-8ccc-000000000065",
+  "reason": "wrong_content",
+  "message": "Đoạn 3 bị lặp"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "id": "0192fa10-0000-7000-8000-000000000001",
+  "status": "open",
+  "created_at": "2026-10-14T08:30:00.000Z"
+}
+```
+
+- Báo cáo được đội ngũ xử lý trong CMS; app không cần theo dõi trạng thái.
+
+Lỗi:
+
+- `400 VALIDATION_ERROR` — thiếu `target_id` với `novel`/`chapter`, `target_type`/`reason` không hợp lệ, `message` quá dài.
+- `404 REPORT_TARGET_NOT_FOUND` — không có truyện/chương với `target_id` này.
+- `429 RATE_LIMITED` — quá 10 lần/giờ.

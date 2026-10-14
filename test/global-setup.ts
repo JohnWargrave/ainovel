@@ -13,6 +13,7 @@ const DATA_TABLES = [
   'users',
   'user_preferences',
   'app_feedback',
+  'content_reports',
   'admin_sessions',
   'user_identities',
   'password_credentials',

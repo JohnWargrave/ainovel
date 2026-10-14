@@ -382,6 +382,23 @@ interface RedemptionStatusHistoryTable {
   created_at: GeneratedTimestamp;
 }
 
+export type ReportTargetType = 'novel' | 'chapter' | 'app';
+export type ReportReason = 'inappropriate' | 'copyright' | 'wrong_content' | 'spam' | 'other';
+export type ReportStatus = 'open' | 'resolved' | 'dismissed';
+
+interface ContentReportsTable {
+  id: string;
+  user_id: string;
+  target_type: ReportTargetType;
+  target_id: string | null;
+  reason: ReportReason;
+  message: string | null;
+  status: Generated<ReportStatus>;
+  resolved_by: string | null;
+  resolved_at: Timestamp | null;
+  created_at: GeneratedTimestamp;
+}
+
 interface AppFeedbackTable {
   id: string;
   user_id: string;
@@ -642,6 +659,7 @@ export interface DB {
   users: UsersTable;
   user_preferences: UserPreferencesTable;
   app_feedback: AppFeedbackTable;
+  content_reports: ContentReportsTable;
   devices: DevicesTable;
   user_identities: UserIdentitiesTable;
   password_credentials: PasswordCredentialsTable;

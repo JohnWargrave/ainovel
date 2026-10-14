@@ -302,7 +302,7 @@ function shell(content: string): string {
   // readable by analysts (stats) and editable by superadmins.
   const pages =
     role === 'editor'
-      ? allPages.filter((page) => page === 'novels')
+      ? allPages.filter((page) => page === 'novels' || page === 'feedback')
       : allPages.filter(
           (page) =>
             (!['offers', 'settings'].includes(page) || role === 'superadmin') &&
@@ -2690,6 +2690,7 @@ const feedbackHost: FeedbackHost = {
   shell,
   wireShell,
   setStatus: (next) => setState(next),
+  role: () => state.session?.role,
 };
 
 async function loadPage(page: Page): Promise<void> {
