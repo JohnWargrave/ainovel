@@ -881,6 +881,7 @@ Response `200`:
     {
       "novel": { "...": "NovelSummary" },
       "last_chapter_no": 57,
+      "last_chapter_title": "Chương 57: Tái ngộ",
       "last_read_at": "2026-10-13T14:02:11.000Z"
     }
   ]
@@ -890,7 +891,7 @@ Response `200`:
 - `featured`: tối đa 10, truyện được admin đánh dấu nổi bật, theo `featured_rank`.
 - `latest`: tối đa 10, theo `updated_at` giảm dần.
 - `popular`: tối đa 10, theo số người đọc khác nhau trong **7 ngày** gần nhất.
-- `continue_reading`: tối đa 5, những truyện user đã mở chương gần nhất (kể cả không nằm trong tủ sách). `last_chapter_no` là chương đã **mở** gần nhất (được ghi khi gọi `GET /novels/:id/chapters/:chapter_no`).
+- `continue_reading`: tối đa 5, những truyện user đã mở chương gần nhất (kể cả không nằm trong tủ sách). `last_chapter_no` là chương đã **mở** gần nhất (được ghi khi gọi `GET /novels/:id/chapters/:chapter_no`). `last_chapter_title` là tiêu đề của chương đó (`null` nếu chương đã bị xoá).
 - Không phân trang.
 
 Lỗi: chỉ các lỗi chung.
@@ -909,6 +910,7 @@ Request (query):
 | `category`          | string                               | không    | ≤ 80 ký tự. **Slug** của thể loại (lấy từ `GET /novels/categories`).                                                                                           |
 | `tag`               | string                               | không    | ≤ 80 ký tự. Khớp chính xác một phần tử của `tags`.                                                                                                             |
 | `completion_status` | `ongoing` \| `completed` \| `hiatus` | không    |                                                                                                                                                                |
+| `language`          | string                               | không    | 2–10 ký tự. Ngôn ngữ gốc của truyện, khớp chính xác `language` trong `NovelSummary` (vd. `vi`, `en`).                                                          |
 | `sort`              | `updated` \| `new` \| `popular`      | không    | Mặc định `updated` (mới cập nhật). `new` = mới xuất bản; `popular` = nhiều người thêm vào tủ sách nhất.                                                        |
 | `cursor`            | string                               | không    | Chuỗi số 1–6 chữ số, lấy nguyên từ `next_cursor` của trang trước. Không gửi ở trang đầu.                                                                       |
 | `limit`             | integer                              | không    | 1–50, mặc định 20.                                                                                                                                             |
@@ -918,9 +920,12 @@ Response `200`:
 ```json
 {
   "items": [{ "...": "NovelSummary" }],
-  "next_cursor": "20"
+  "next_cursor": "20",
+  "total": 134
 }
 ```
+
+- `total`: tổng số truyện khớp bộ lọc trên **mọi** trang (dùng cho dòng "134 kết quả"); giống nhau ở mọi trang của cùng một truy vấn.
 
 - `next_cursor`: `null` khi hết dữ liệu. Thực chất là offset (không phải keyset) — app chỉ cần coi là chuỗi mờ và gửi lại y nguyên. Khi dữ liệu thay đổi giữa hai trang có thể bị trùng/sót một vài truyện.
 
@@ -989,6 +994,7 @@ Response `200` (= `NovelSummary` + các field sau):
   "vip_from_chapter": 101,
   "default_unlock_coin": 50,
   "allow_ad_unlock": true,
+  "share_url": "https://ainovel.app/n/dau-pha-thuong-khung",
   "library": {
     "in_bookshelf": true,
     "last_chapter_no": 57,
@@ -1000,6 +1006,7 @@ Response `200` (= `NovelSummary` + các field sau):
 - `vip_from_chapter`: từ chương số này trở đi mặc định là VIP; `null` = không có VIP mặc định. **Lưu ý:** từng chương có thể bị admin ghi đè VIP/không VIP và giá riêng → luôn dựa vào `is_vip` / `unlock_price` trong mục lục, không tự suy ra từ field này.
 - `default_unlock_coin`: giá mở khoá mặc định (coin) cho chương VIP không có giá riêng.
 - `allow_ad_unlock`: truyện có cho mở chương VIP bằng quảng cáo hay không.
+- `share_url`: link chia sẻ truyện. **Có thể không có** (field bị bỏ hẳn chứ không phải `null`) khi server chưa cấu hình base URL — khi đó app chia sẻ tiêu đề truyện.
 - `library`: `in_bookshelf=false`, `last_*=null` nếu user chưa từng tương tác.
 
 Lỗi:
@@ -1274,6 +1281,7 @@ Response `200`:
       "novel": { "...": "NovelSummary" },
       "in_bookshelf": true,
       "last_chapter_no": 57,
+      "last_chapter_title": "Chương 57: Tái ngộ",
       "last_read_at": "2026-10-13T14:02:11.000Z"
     }
   ]
@@ -1281,6 +1289,7 @@ Response `200`:
 ```
 
 - Không phân trang (không có cursor) — chỉ trả tối đa `limit` bản ghi.
+- `last_chapter_title`: tiêu đề chương mở gần nhất, `null` nếu chưa mở chương nào hoặc chương đã bị xoá.
 - Truyện không còn hiển thị với vùng của user bị loại khỏi danh sách.
 
 Lỗi: chỉ các lỗi chung.

@@ -1,6 +1,8 @@
 import { sql } from 'kysely';
 import { db } from '../../db/index.js';
+import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
+import { shareUrl } from '../../lib/share-url.js';
 import {
   chapterUnlockPrice,
   chapterVisible,
@@ -110,6 +112,10 @@ async function toSummaries(rows: readonly SummaryRow[]): Promise<NovelSummary[]>
   }));
 }
 
+function novelShareUrl(slug: string): string | undefined {
+  return shareUrl(env.NOVEL_SHARE_BASE_URL, slug);
+}
+
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/gu, (match) => `\\${match}`);
 }
@@ -117,7 +123,7 @@ function escapeLike(value: string): string {
 export async function listNovels(
   userId: string,
   query: ListNovelsQuery,
-): Promise<{ items: NovelSummary[]; next_cursor: string | null }> {
+): Promise<{ items: NovelSummary[]; next_cursor: string | null; total: number }> {
   const reader = await loadReader(userId);
   const limit = query.limit ?? DEFAULT_PAGE_SIZE;
   const offset = Number(query.cursor ?? 0);
@@ -146,6 +152,10 @@ export async function listNovels(
   if (query.completion_status) {
     builder = builder.where('novels.completion_status', '=', query.completion_status);
   }
+  if (query.language) {
+    builder = builder.where('novels.language', '=', query.language);
+  }
+  const countQuery = builder.clearSelect().select((eb) => eb.fn.countAll<string>().as('total'));
 
   switch (query.sort ?? 'updated') {
     case 'new':
@@ -167,14 +177,18 @@ export async function listNovels(
 
   // Offset rather than keyset: "popular" orders by an aggregate with no stable key, and the catalog
   // is small enough that deep offsets are not a concern.
-  const rows = await builder
-    .limit(limit + 1)
-    .offset(offset)
-    .execute();
+  const [rows, count] = await Promise.all([
+    builder
+      .limit(limit + 1)
+      .offset(offset)
+      .execute(),
+    countQuery.executeTakeFirstOrThrow(),
+  ]);
   const page = rows.slice(0, limit);
   return {
     items: await toSummaries(page),
     next_cursor: rows.length > limit ? String(offset + limit) : null,
+    total: Number(count.total),
   };
 }
 
@@ -198,6 +212,7 @@ export async function getHome(userId: string): Promise<{
   continue_reading: {
     novel: NovelSummary;
     last_chapter_no: number | null;
+    last_chapter_title: string | null;
     last_read_at: string | null;
   }[];
 }> {
@@ -234,7 +249,13 @@ export async function getHome(userId: string): Promise<{
     db
       .selectFrom('novel_library')
       .innerJoin('novels', 'novels.id', 'novel_library.novel_id')
-      .select([...SUMMARY_COLUMNS, 'novel_library.last_chapter_no', 'novel_library.last_read_at'])
+      .leftJoin('novel_chapters', 'novel_chapters.id', 'novel_library.last_chapter_id')
+      .select([
+        ...SUMMARY_COLUMNS,
+        'novel_library.last_chapter_no',
+        'novel_chapters.title as last_chapter_title',
+        'novel_library.last_read_at',
+      ])
       .where('novel_library.user_id', '=', reader.id)
       .where('novel_library.last_read_at', 'is not', null)
       .where(novelVisibleTo(reader))
@@ -254,6 +275,7 @@ export async function getHome(userId: string): Promise<{
         {
           novel,
           last_chapter_no: row.last_chapter_no,
+          last_chapter_title: row.last_chapter_title,
           last_read_at: row.last_read_at ? new Date(row.last_read_at).toISOString() : null,
         },
       ];
@@ -298,6 +320,7 @@ export async function getNovel(userId: string, novelId: string): Promise<NovelDe
     .executeTakeFirst();
   const [summary] = await toSummaries([novel]);
   if (!summary) throw new AppError('NOVEL_NOT_FOUND', 'Novel not found', 404);
+  const shareLink = novelShareUrl(novel.slug);
   return {
     ...summary,
     alt_titles: novel.alt_titles,
@@ -305,6 +328,7 @@ export async function getNovel(userId: string, novelId: string): Promise<NovelDe
     vip_from_chapter: novel.vip_from_chapter,
     default_unlock_coin: novel.default_unlock_coin,
     allow_ad_unlock: novel.allow_ad_unlock,
+    ...(shareLink ? { share_url: shareLink } : {}),
     library: {
       in_bookshelf: library?.in_bookshelf ?? false,
       last_chapter_no: library?.last_chapter_no ?? null,
@@ -475,6 +499,7 @@ export async function getLibrary(
     novel: NovelSummary;
     in_bookshelf: boolean;
     last_chapter_no: number | null;
+    last_chapter_title: string | null;
     last_read_at: string | null;
   }[];
 }> {
@@ -482,10 +507,12 @@ export async function getLibrary(
   let builder = db
     .selectFrom('novel_library')
     .innerJoin('novels', 'novels.id', 'novel_library.novel_id')
+    .leftJoin('novel_chapters', 'novel_chapters.id', 'novel_library.last_chapter_id')
     .select([
       ...SUMMARY_COLUMNS,
       'novel_library.in_bookshelf',
       'novel_library.last_chapter_no',
+      'novel_chapters.title as last_chapter_title',
       'novel_library.last_read_at',
     ])
     .where('novel_library.user_id', '=', reader.id)
@@ -509,6 +536,7 @@ export async function getLibrary(
           novel,
           in_bookshelf: row.in_bookshelf,
           last_chapter_no: row.last_chapter_no,
+          last_chapter_title: row.last_chapter_title,
           last_read_at: row.last_read_at ? new Date(row.last_read_at).toISOString() : null,
         },
       ];

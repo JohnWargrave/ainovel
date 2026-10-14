@@ -29,6 +29,8 @@ export const ListNovelsQuerySchema = Type.Object({
   completion_status: Type.Optional(
     Type.Union([Type.Literal('ongoing'), Type.Literal('completed'), Type.Literal('hiatus')]),
   ),
+  // Original language of the text, e.g. "vi", "en".
+  language: Type.Optional(Type.String({ minLength: 2, maxLength: 10 })),
   sort: Type.Optional(NovelSortSchema),
   cursor: Type.Optional(Type.String({ pattern: '^[0-9]{1,6}$' })),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
@@ -69,6 +71,8 @@ export type NovelSummary = Static<typeof NovelSummarySchema>;
 export const NovelListResponseSchema = Type.Object({
   items: Type.Array(NovelSummarySchema),
   next_cursor: Nullable(Type.String()),
+  // Every novel matching the filters, across all pages.
+  total: Type.Integer(),
 });
 
 export const HomeResponseSchema = Type.Object({
@@ -79,6 +83,7 @@ export const HomeResponseSchema = Type.Object({
     Type.Object({
       novel: NovelSummarySchema,
       last_chapter_no: Type.Union([Type.Integer(), Type.Null()]),
+      last_chapter_title: Nullable(Type.String()),
       last_read_at: Nullable(Type.String()),
     }),
   ),
@@ -98,6 +103,8 @@ export const NovelDetailSchema = Type.Composite([
     vip_from_chapter: Type.Union([Type.Integer(), Type.Null()]),
     default_unlock_coin: Type.Integer(),
     allow_ad_unlock: Type.Boolean(),
+    // Absent when NOVEL_SHARE_BASE_URL is not configured; the app then shares the title alone.
+    share_url: Type.Optional(Type.String()),
     library: LibraryStateSchema,
   }),
 ]);
@@ -201,6 +208,7 @@ export const LibraryResponseSchema = Type.Object({
       novel: NovelSummarySchema,
       in_bookshelf: Type.Boolean(),
       last_chapter_no: Type.Union([Type.Integer(), Type.Null()]),
+      last_chapter_title: Nullable(Type.String()),
       last_read_at: Nullable(Type.String()),
     }),
   ),

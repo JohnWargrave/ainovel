@@ -152,4 +152,70 @@ describe('novel catalog', () => {
       expect(after.json<NovelSummaryBody>().read_count).toBe(2);
     });
   });
+
+  describe('list, home and library', () => {
+    it('filters by language and reports the total across pages', async () => {
+      const regionId = await createRegion();
+      const userId = await createUser(regionId);
+      // A language code no other test uses keeps the count independent of the shared catalog.
+      const language = `x${randomUUID().slice(0, 6)}`;
+      for (let i = 0; i < 3; i += 1) await createNovel({ chapters: 1, language });
+      await createNovel({ chapters: 1 });
+
+      const first = await get(userId, `/novels?language=${language}&limit=2`);
+      expect(first.statusCode).toBe(200);
+      const page = first.json<{
+        items: NovelSummaryBody[];
+        next_cursor: string | null;
+        total: number;
+      }>();
+      expect(page.total).toBe(3);
+      expect(page.items).toHaveLength(2);
+      expect(page.items.every((item) => item.language === language)).toBe(true);
+      expect(page.next_cursor).toBe('2');
+
+      const last = await get(userId, `/novels?language=${language}&limit=2&cursor=2`);
+      expect(last.json<{ items: unknown[]; total: number }>()).toMatchObject({ total: 3 });
+      expect(last.json<{ items: unknown[] }>().items).toHaveLength(1);
+    });
+
+    it('names the last chapter read on home and in the library', async () => {
+      const regionId = await createRegion();
+      const userId = await createUser(regionId);
+      const { novelId } = await createNovel({ chapters: 3 });
+      await get(userId, `/novels/${novelId}/chapters/2`);
+
+      const home = await get(userId, '/novels/home');
+      expect(home.statusCode).toBe(200);
+      const row = home
+        .json<{
+          continue_reading: { novel: { id: string }; last_chapter_title: string | null }[];
+        }>()
+        .continue_reading.find((entry) => entry.novel.id === novelId);
+      expect(row?.last_chapter_title).toBe('Chapter 2');
+
+      const library = await get(userId, '/library?view=history');
+      expect(library.statusCode).toBe(200);
+      const item = library
+        .json<{ items: { novel: { id: string }; last_chapter_title: string | null }[] }>()
+        .items.find((entry) => entry.novel.id === novelId);
+      expect(item?.last_chapter_title).toBe('Chapter 2');
+    });
+
+    it('returns a share link built from the novel slug', async () => {
+      const regionId = await createRegion();
+      const userId = await createUser(regionId);
+      const { novelId } = await createNovel({ chapters: 1 });
+      const { slug } = await db
+        .selectFrom('novels')
+        .select('slug')
+        .where('id', '=', novelId)
+        .executeTakeFirstOrThrow();
+
+      const res = await get(userId, `/novels/${novelId}`);
+      expect(res.json<{ share_url?: string }>().share_url).toBe(
+        `https://links.ainovel.test/n/${slug}`,
+      );
+    });
+  });
 });
