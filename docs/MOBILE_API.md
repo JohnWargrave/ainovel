@@ -1131,12 +1131,17 @@ Lỗi:
       "message": "This chapter must be unlocked first",
       "chapter_id": "0192f7b1-aaaa-7bbb-8ccc-000000000065",
       "unlock_price": 50,
-      "ad_unlock": true
+      "ad_unlock": true,
+      "preview": {
+        "title": "Chương 101: Cửa ải",
+        "text": "Đoạn mở đầu thứ nhất…\n\nĐoạn thứ hai…"
+      }
     }
   }
   ```
 
   `chapter_id` dùng ngay cho `POST /novels/chapters/:id/unlock`; `unlock_price` là giá coin; `ad_unlock` = truyện có cho mở bằng quảng cáo không.
+  `preview`: phần mở đầu để hiển thị phía trên popup mở khoá — tiêu đề chương và 2 đoạn đầu (cách nhau bằng `\n\n`), tối đa 800 ký tự; nếu bị cắt thì cắt ở ranh giới từ và kết thúc bằng `…`. Chỉ có ở endpoint này; `CHAPTER_LOCKED` từ heartbeat/unlock không kèm `preview`.
 
 - `429 RATE_LIMITED` — vượt 20 chương/phút hoặc 300 chương/giờ.
 

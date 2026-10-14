@@ -7,6 +7,7 @@ import {
   chapterUnlockPrice,
   chapterVisible,
   chapterLockedError,
+  loadChapterPreview,
   findReadableChapter,
   hasUnlocked,
   isChapterVip,
@@ -414,7 +415,7 @@ export async function readChapter(
   const chapter = await findReadableChapter(reader, { novelId, chapterNo }, now);
   const vip = isChapterVip(chapter, chapter);
   if (vip && !(await hasUnlocked(reader.id, chapter.id))) {
-    throw chapterLockedError(chapter);
+    throw chapterLockedError(chapter, await loadChapterPreview(chapter));
   }
 
   const [content, neighbours, progress, feature] = await Promise.all([

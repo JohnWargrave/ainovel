@@ -114,10 +114,44 @@ export async function hasUnlocked(userId: string, chapterId: string): Promise<bo
   return row !== undefined;
 }
 
-export function chapterLockedError(chapter: ReadableChapter): AppError {
+export interface ChapterPreview {
+  title: string;
+  text: string;
+}
+
+const PREVIEW_PARAGRAPHS = 2;
+const PREVIEW_MAX_CHARS = 800;
+// Enough raw text to hold the preview; the full chapter never leaves the database for a locked read.
+const PREVIEW_SOURCE_CHARS = 4 * PREVIEW_MAX_CHARS;
+
+// The opening a locked chapter's paywall shows: its first paragraphs, cut at a word boundary.
+export async function loadChapterPreview(chapter: ReadableChapter): Promise<ChapterPreview> {
+  const row = await db
+    .selectFrom('novel_chapters')
+    .select(sql<string>`left(content, ${PREVIEW_SOURCE_CHARS})`.as('head'))
+    .where('id', '=', chapter.id)
+    .executeTakeFirstOrThrow();
+  return { title: chapter.title, text: previewText(row.head) };
+}
+
+export function previewText(head: string): string {
+  const text = head
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+    .slice(0, PREVIEW_PARAGRAPHS)
+    .join('\n\n');
+  if (text.length <= PREVIEW_MAX_CHARS) return text;
+  const cut = text.slice(0, PREVIEW_MAX_CHARS);
+  const space = cut.search(/\s\S*$/);
+  return `${(space > 0 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
+export function chapterLockedError(chapter: ReadableChapter, preview?: ChapterPreview): AppError {
   return new AppError('CHAPTER_LOCKED', 'This chapter must be unlocked first', 403, undefined, {
     chapter_id: chapter.id,
     unlock_price: chapterUnlockPrice(chapter, chapter),
     ad_unlock: chapter.allow_ad_unlock,
+    ...(preview ? { preview } : {}),
   });
 }

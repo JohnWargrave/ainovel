@@ -218,4 +218,41 @@ describe('novel catalog', () => {
       );
     });
   });
+
+  describe('locked chapter preview', () => {
+    interface LockedBody {
+      error: { code: string; preview?: { title: string; text: string } };
+    }
+
+    it('shows the opening paragraphs of a VIP chapter the reader has not unlocked', async () => {
+      const userId = await createUser(await createRegion());
+      const { novelId } = await createNovel({
+        chapters: 2,
+        vipFrom: 2,
+        content: (no) =>
+          `  Opening of ${String(no)}.\r\n\r\nSecond line.\nThird line stays locked.`,
+      });
+
+      const res = await get(userId, `/novels/${novelId}/chapters/2`);
+      expect(res.statusCode).toBe(403);
+      expect(res.json<LockedBody>().error).toMatchObject({
+        code: 'CHAPTER_LOCKED',
+        preview: { title: 'Chapter 2', text: 'Opening of 2.\n\nSecond line.' },
+      });
+    });
+
+    it('caps the preview at 800 characters on a word boundary', async () => {
+      const userId = await createUser(await createRegion());
+      const { novelId } = await createNovel({
+        chapters: 1,
+        vipFrom: 1,
+        content: () => 'word '.repeat(1000),
+      });
+
+      const res = await get(userId, `/novels/${novelId}/chapters/1`);
+      const text = res.json<LockedBody>().error.preview?.text ?? '';
+      expect(text.length).toBeLessThanOrEqual(801);
+      expect(text).toMatch(/word…$/);
+    });
+  });
 });
