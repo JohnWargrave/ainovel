@@ -1794,6 +1794,10 @@ function catalogEditor(item?: CatalogItemAdmin): string {
       <label>Image URL<input name="image_url" type="url" value="${escapeHtml(item?.image_url ?? '')}" /></label>
       <label>Supplier URL<input name="seagm_url" type="url" value="${escapeHtml(item?.seagm_url ?? '')}" /></label>
       <label class="field-wide">Stock note<input name="stock_note" value="${escapeHtml(item?.stock_note ?? '')}" placeholder="Out of stock until Friday" /></label>
+      <label>Delivered as<select name="recipient_type">
+        <option value="none" ${item?.recipient_type === 'paypal_email' ? '' : 'selected'}>Code (pasted by fulfillment)</option>
+        <option value="paypal_email" ${item?.recipient_type === 'paypal_email' ? 'selected' : ''}>PayPal payment (app asks for an email)</option>
+      </select></label>
       <label class="switch-label field-wide"><input name="is_active" type="checkbox" ${item?.is_active ? 'checked' : ''} /><span><strong>Listed for exchange</strong><small>Unlisted items stay in the catalog but users cannot redeem them.</small></span></label>
       <div class="form-actions field-wide">
         <button type="submit">${isEditing ? 'Save reward' : 'Create reward'}</button>
@@ -1885,6 +1889,7 @@ function catalogFormInput(form: HTMLFormElement): CatalogFormFields {
     ...(text('image_url') ? { image_url: text('image_url') } : {}),
     ...(text('seagm_url') ? { seagm_url: text('seagm_url') } : {}),
     ...(text('stock_note') ? { stock_note: text('stock_note') } : {}),
+    recipient_type: text('recipient_type') === 'paypal_email' ? 'paypal_email' : 'none',
     is_active: values.get('is_active') === 'on',
   };
 }
@@ -2104,6 +2109,7 @@ function renderRedemptionDetail(detail: RedemptionDetail): void {
           <dt>User</dt><dd>${escapeHtml(detail.user.email ?? detail.user.id)}<small>${escapeHtml(detail.user.id)}</small></dd>
           <dt>Reward</dt><dd>${escapeHtml(detail.redemption.reward.title)} · ${escapeHtml(detail.redemption.reward.face_value)}</dd>
           <dt>SKU</dt><dd>${escapeHtml(detail.redemption.reward.sku)}</dd>
+          ${detail.recipient_email ? `<dt>Send PayPal to</dt><dd><code>${escapeHtml(detail.recipient_email)}</code></dd>` : ''}
           <dt>Coin charged</dt><dd>${integer(detail.redemption.coin_price)}</dd>
           <dt>Estimated cost</dt><dd>${money(Number(detail.redemption.usd_cost_est))}</dd>
           <dt>Region</dt><dd>${escapeHtml(detail.user.region_id)} / ${escapeHtml(detail.user.country_code)}</dd>
@@ -2131,7 +2137,7 @@ function renderRedemptionDetail(detail: RedemptionDetail): void {
       </ul>
     </article>
     ${canApprove || canStartFulfillment ? `<dialog id="redemptionActionDialog" aria-labelledby="redemptionActionTitle"><div class="form-stack"><div><p class="eyebrow">Confirm action</p><h3 id="redemptionActionTitle"></h3><p id="redemptionActionMessage" class="muted"></p></div><div class="form-actions"><button id="confirmRedemptionAction" type="button"></button><button id="cancelRedemptionAction" class="secondary" type="button">Cancel</button></div></div></dialog>` : ''}
-    ${canDeliver ? `<dialog id="deliveryDialog"><form id="deliveryCodeForm" class="form-stack"><div><p class="eyebrow">Complete fulfillment</p><h3>Deliver ${escapeHtml(detail.redemption.reward.title)}</h3><p class="muted">${escapeHtml(detail.user.email ?? detail.user.id)} · ${escapeHtml(detail.redemption.reward.face_value)}</p></div><label>Delivery code<textarea name="delivery_code" rows="4" minlength="1" maxlength="4000" autocomplete="off" required></textarea></label><label>Delivery note<textarea name="note" rows="2" maxlength="2000" placeholder="Optional instructions for the user"></textarea></label><div class="form-actions"><button type="submit">Deliver reward</button><button id="cancelDelivery" class="secondary" type="button">Cancel</button></div></form></dialog>` : ''}
+    ${canDeliver ? `<dialog id="deliveryDialog"><form id="deliveryCodeForm" class="form-stack"><div><p class="eyebrow">Complete fulfillment</p><h3>Deliver ${escapeHtml(detail.redemption.reward.title)}</h3><p class="muted">${escapeHtml(detail.user.email ?? detail.user.id)} · ${escapeHtml(detail.redemption.reward.face_value)}</p></div><label>${detail.recipient_email ? 'PayPal transaction ID' : 'Delivery code'}<textarea name="delivery_code" rows="4" minlength="1" maxlength="4000" autocomplete="off" required></textarea></label><label>Delivery note<textarea name="note" rows="2" maxlength="2000" placeholder="Optional instructions for the user"></textarea></label><div class="form-actions"><button type="submit">Deliver reward</button><button id="cancelDelivery" class="secondary" type="button">Cancel</button></div></form></dialog>` : ''}
   `;
   const actionDialog = target.querySelector<HTMLDialogElement>('#redemptionActionDialog');
   const actionTitle = target.querySelector<HTMLElement>('#redemptionActionTitle');

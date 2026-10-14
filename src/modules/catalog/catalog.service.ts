@@ -1,7 +1,7 @@
 import type { Transaction } from 'kysely';
 import { uuidv7 } from 'uuidv7';
 import { db } from '../../db/index.js';
-import type { DB } from '../../db/types.js';
+import type { DB, RecipientType } from '../../db/types.js';
 import { AppError } from '../../lib/errors.js';
 import type {
   BulkApproveBody,
@@ -36,6 +36,7 @@ interface CatalogItemRow {
   is_active: boolean;
   stock_note: string | null;
   source: string;
+  recipient_type: RecipientType;
   updated_at: Date;
 }
 
@@ -67,6 +68,7 @@ function serializeCatalogItem(row: CatalogItemRow): CatalogItemResponse {
     is_active: row.is_active,
     stock_note: row.stock_note,
     source: row.source,
+    recipient_type: row.recipient_type,
     updated_at: row.updated_at.toISOString(),
   };
 }
@@ -147,6 +149,7 @@ function serializePublicItem(row: CatalogItemRow): PublicCatalogItem {
     // without the app having to re-infer availability from an item's absence.
     available: true,
     stock_note: row.stock_note,
+    recipient_type: row.recipient_type,
   };
 }
 
@@ -218,6 +221,7 @@ export async function createCatalogItem(
         regions: body.regions,
         is_active: body.is_active ?? false,
         stock_note: body.stock_note ?? null,
+        recipient_type: body.recipient_type ?? 'none',
         source: 'manual',
       })
       .execute();
@@ -264,6 +268,7 @@ export async function updateCatalogItem(
         ...(patch.regions !== undefined ? { regions: patch.regions } : {}),
         ...(patch.is_active !== undefined ? { is_active: patch.is_active } : {}),
         ...(patch.stock_note !== undefined ? { stock_note: patch.stock_note } : {}),
+        ...(patch.recipient_type !== undefined ? { recipient_type: patch.recipient_type } : {}),
         updated_at: new Date(),
       })
       .where('id', '=', id)
@@ -350,13 +355,14 @@ async function approveStagingRow(
   }
 
   const payload = (staging.payload ?? {}) as Record<string, unknown>;
+  const category = readString(payload['category']) ?? 'gift_card';
   await trx
     .insertInto('catalog_items')
     .values({
       id: uuidv7(),
       sku: staging.sku,
       title: readString(payload['title']) ?? staging.sku,
-      category: readString(payload['category']) ?? 'gift_card',
+      category,
       face_value: readString(payload['face_value']) ?? '',
       usd_cost: readNumeric(payload['usd_cost']) ?? '0',
       coin_price: readNumber(payload['coin_price']) ?? 0,
@@ -366,6 +372,8 @@ async function approveStagingRow(
       is_active: true,
       stock_note: null,
       source: 'crawler',
+      // A PayPal reward is paid to an address, so a newly listed one asks for it from the start.
+      recipient_type: category === 'paypal' ? 'paypal_email' : 'none',
     })
     .onConflict((oc) =>
       oc.column('sku').doUpdateSet({

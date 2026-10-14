@@ -311,6 +311,10 @@ interface RewardedAdIntentsTable {
   checkin_bonus_ledger_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
+// What the app collects before redeeming an item: nothing (a code is delivered) or the PayPal
+// address the reward is sent to.
+export type RecipientType = 'none' | 'paypal_email';
+
 interface CatalogItemsTable {
   id: string;
   sku: string;
@@ -325,6 +329,7 @@ interface CatalogItemsTable {
   is_active: Generated<boolean>;
   stock_note: string | null;
   source: Generated<string>;
+  recipient_type: Generated<RecipientType>;
   updated_at: GeneratedTimestamp;
 }
 
@@ -360,6 +365,7 @@ interface RedemptionsTable {
   delivery_note: string | null;
   delivered_at: Timestamp | null;
   claimed_at: Timestamp | null;
+  recipient_email: string | null;
   claimable_at: GeneratedTimestamp;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;

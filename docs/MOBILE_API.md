@@ -2247,7 +2247,8 @@ Response `200`:
       "coin_price": "110000",
       "image_url": "https://cdn.example.com/catalog/gplay.png",
       "available": true,
-      "stock_note": null
+      "stock_note": null,
+      "recipient_type": "none"
     }
   ]
 }
@@ -2257,6 +2258,7 @@ Response `200`:
 - `coin_price` là **string**.
 - `available` hiện luôn `true`.
 - `image_url`, `stock_note` có thể `null`.
+- `recipient_type`: `none` (quà là mã, giao qua `GET /redemptions/:id/code`) | `paypal_email` (tiền được gửi vào tài khoản PayPal — app phải hỏi email PayPal trước khi đổi và gửi kèm `recipient_email` ở `POST /redemptions`).
 - Item được lọc theo IP lúc xem, nhưng khi tạo đơn server kiểm tra lại theo `country_code`/`region_id` lưu trên account. Vì vậy một item thấy được trong catalog vẫn có thể bị từ chối nếu user dùng VPN.
 
 Lỗi:
@@ -2269,9 +2271,10 @@ Tạo đơn đổi quà. Coin bị trừ ngay khỏi `available` (`REDEMPTION_DE
 
 Body:
 
-| Field             | Kiểu   | Bắt buộc | Ràng buộc                          |
-| ----------------- | ------ | -------- | ---------------------------------- |
-| `catalog_item_id` | string | có       | `id` (UUID) của item trong catalog |
+| Field             | Kiểu   | Bắt buộc | Ràng buộc                                                                                                                                                                    |
+| ----------------- | ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `catalog_item_id` | string | có       | `id` (UUID) của item trong catalog                                                                                                                                           |
+| `recipient_email` | string | tuỳ item | Email PayPal nhận tiền, ≤ 254 ký tự, dạng `a@b.c`, không có khoảng trắng (app tự trim). **Bắt buộc** khi item có `recipient_type = "paypal_email"`; bị bỏ qua với item khác. |
 
 ```json
 { "catalog_item_id": "01929e00-aaaa-7bbb-8ccc-000000000001" }
@@ -2298,6 +2301,7 @@ Response `200` (`RedemptionResponse`):
   "delivery_note": null,
   "delivered_at": null,
   "claimed_at": null,
+  "recipient_email_masked": null,
   "claim_state": "PENDING",
   "claimable_at": "2026-10-16T03:30:00.000Z",
   "seconds_until_claimable": 172800,
@@ -2311,10 +2315,12 @@ Response `200` (`RedemptionResponse`):
 - `reward` là snapshot của item tại thời điểm đổi. Field ở đây dùng tên DB (`category`, `face_value`), khác với tên trong catalog (`category_id`, `subtitle`).
 - `coin_price`, `usd_cost_est` là string. `fraud_score_at_request` là number hoặc `null`.
 - `seconds_until_claimable` (integer ≥ 0) dùng để chạy countdown. `can_claim_now` tương đương `claim_state == "CLAIMABLE"`.
+- `recipient_email_masked`: email PayPal đã nhập, dạng che (`a***@gmail.com`), để hiện "Gửi tới a***@gmail.com"; `null` với quà dạng mã. Server không bao giờ trả lại email đầy đủ. Với quà PayPal, "mã" ở `GET /redemptions/:id/code` là mã giao dịch PayPal.
 
 Lỗi:
 
-- `400 VALIDATION_ERROR`: thiếu `catalog_item_id`.
+- `400 VALIDATION_ERROR`: thiếu `catalog_item_id`, hoặc `recipient_email` sai định dạng.
+- `400 RECIPIENT_REQUIRED`: item cần email PayPal nhưng không gửi `recipient_email`. Không trừ coin.
 - `400 CATALOG_ITEM_UNAVAILABLE`: item không tồn tại, đã tắt, hoặc không bán cho quốc gia hay region của account.
 - `400 REDEMPTION_WEEKLY_CAP`: vượt trần USD đổi quà trong 7 ngày cuộn (trần theo trust level).
 - `400 INSUFFICIENT_BALANCE`: không đủ coin available.

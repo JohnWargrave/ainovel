@@ -24,6 +24,10 @@ export type RedemptionClaimState = Static<typeof RedemptionClaimStateSchema>;
 
 export const CreateRedemptionBodySchema = Type.Object({
   catalog_item_id: Type.String({ minLength: 1 }),
+  // Required when the item's recipient_type is paypal_email; ignored otherwise.
+  recipient_email: Type.Optional(
+    Type.String({ minLength: 3, maxLength: 254, pattern: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$' }),
+  ),
 });
 export type CreateRedemptionBody = Static<typeof CreateRedemptionBodySchema>;
 
@@ -48,6 +52,8 @@ export const RedemptionResponseSchema = Type.Object({
   delivery_note: Type.Union([Type.String(), Type.Null()]),
   delivered_at: Type.Union([Type.String(), Type.Null()]),
   claimed_at: Type.Union([Type.String(), Type.Null()]),
+  // The PayPal address the reward goes to, masked ("a***@gmail.com"); null for code rewards.
+  recipient_email_masked: Type.Union([Type.String(), Type.Null()]),
   claim_state: RedemptionClaimStateSchema,
   claimable_at: Type.String(),
   seconds_until_claimable: Type.Integer({ minimum: 0 }),
@@ -96,6 +102,8 @@ export type AdminRedemptionListQuery = Static<typeof AdminRedemptionListQuerySch
 export const AdminRedemptionSummarySchema = Type.Intersect([
   RedemptionResponseSchema,
   Type.Object({
+    // Unmasked: fulfillment sends the money to it.
+    recipient_email: Type.Union([Type.String(), Type.Null()]),
     user: Type.Object({
       id: Type.String(),
       email: Type.Union([Type.String(), Type.Null()]),
@@ -139,6 +147,7 @@ export type PasteCodeBody = Static<typeof PasteCodeBodySchema>;
 
 export const AdminRedemptionDetailSchema = Type.Object({
   redemption: RedemptionResponseSchema,
+  recipient_email: Type.Union([Type.String(), Type.Null()]),
   user: Type.Object({
     id: Type.String(),
     email: Type.Union([Type.String(), Type.Null()]),

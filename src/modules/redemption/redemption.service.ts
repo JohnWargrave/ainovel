@@ -51,6 +51,7 @@ interface RedemptionRow {
   delivery_note: string | null;
   delivered_at: Date | null;
   claimed_at: Date | null;
+  recipient_email: string | null;
   claimable_at: Date;
   created_at: Date;
   updated_at: Date;
@@ -68,6 +69,7 @@ export interface RedemptionResponse {
   delivery_note: string | null;
   delivered_at: string | null;
   claimed_at: string | null;
+  recipient_email_masked: string | null;
   claim_state: RedemptionClaimState;
   claimable_at: string;
   seconds_until_claimable: number;
@@ -156,6 +158,14 @@ function deriveClaimState(row: RedemptionRow, now: Date): RedemptionClaimState {
   return 'PENDING';
 }
 
+// "alice@gmail.com" -> "a***@gmail.com": enough for the user to recognise the address they typed,
+// without the redemption history becoming a place to read it back in full.
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf('@');
+  if (at <= 0) return '***';
+  return `${email.slice(0, 1)}***${email.slice(at)}`;
+}
+
 function serializeRedemption(row: RedemptionRow, now: Date = new Date()): RedemptionResponse {
   const claimState = deriveClaimState(row, now);
   return {
@@ -170,6 +180,7 @@ function serializeRedemption(row: RedemptionRow, now: Date = new Date()): Redemp
     delivery_note: row.delivery_note,
     delivered_at: row.delivered_at?.toISOString() ?? null,
     claimed_at: row.claimed_at?.toISOString() ?? null,
+    recipient_email_masked: row.recipient_email ? maskEmail(row.recipient_email) : null,
     claim_state: claimState,
     claimable_at: row.claimable_at.toISOString(),
     seconds_until_claimable: Math.max(
@@ -367,6 +378,7 @@ async function decryptedDeliveryCode(deliveryCode: string): Promise<string> {
 export async function createRedemption(
   userId: string,
   catalogItemId: string,
+  recipientEmail?: string,
 ): Promise<RedemptionResponse> {
   return db.transaction().execute(async (trx) => {
     const user = await trx
@@ -403,6 +415,7 @@ export async function createRedemption(
         'usd_cost',
         'regions',
         'is_active',
+        'recipient_type',
       ])
       .where('id', '=', catalogItemId)
       .executeTakeFirst();
@@ -415,6 +428,11 @@ export async function createRedemption(
         'Catalog item is unavailable in this region',
         400,
       );
+    }
+
+    const recipient = item.recipient_type === 'paypal_email' ? recipientEmail : undefined;
+    if (item.recipient_type === 'paypal_email' && !recipient) {
+      throw new AppError('RECIPIENT_REQUIRED', 'This reward needs a PayPal email address', 400);
     }
 
     const regionConfig = await trx
@@ -489,6 +507,7 @@ export async function createRedemption(
           image_url: item.image_url,
         },
         status: 'REQUESTED',
+        recipient_email: recipient ?? null,
         fraud_score_at_request: scoreResult.score,
         // Counted from the request, not from fulfillment: the countdown the user is shown starts
         // when their coins leave the wallet and never stretches because fulfillment was slow.
@@ -725,6 +744,7 @@ export async function listAdminRedemptions(
       const redemption = serializeRedemption(row);
       return {
         ...redemption,
+        recipient_email: row.recipient_email,
         user: {
           id: row.admin_user_id,
           email: row.admin_user_email,
@@ -900,6 +920,7 @@ export async function getAdminRedemptionDetail(
 
   return {
     redemption: serializeRedemption(redemption),
+    recipient_email: redemption.recipient_email,
     user,
     catalog_item: catalogItem,
     history: history.map((row) => ({

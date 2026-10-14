@@ -278,8 +278,12 @@ export interface CatalogItemAdmin {
   stock_note: string | null;
   // 'crawler' or 'manual' — provenance, so an operator knows what the next crawl may overwrite.
   source: string;
+  recipient_type: RecipientType;
   updated_at: string;
 }
+
+// paypal_email: the app collects a PayPal address and fulfillment sends the money to it by hand.
+export type RecipientType = 'none' | 'paypal_email';
 
 export interface CreateCatalogItemInput {
   sku: string;
@@ -293,6 +297,7 @@ export interface CreateCatalogItemInput {
   regions: string[];
   is_active?: boolean;
   stock_note?: string;
+  recipient_type?: RecipientType;
 }
 
 // sku and category are create-only on the server, so the edit form must not offer them.
@@ -443,6 +448,7 @@ export interface Redemption {
 }
 
 export interface AdminRedemptionSummary extends Redemption {
+  recipient_email: string | null;
   user: {
     id: string;
     email: string | null;
@@ -463,6 +469,8 @@ export interface AdminRedemptionSummary extends Redemption {
 
 export interface RedemptionDetail {
   redemption: Redemption;
+  // Unmasked PayPal address for paypal_email rewards; null for code rewards.
+  recipient_email: string | null;
   user: {
     id: string;
     email: string | null;

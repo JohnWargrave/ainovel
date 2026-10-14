@@ -1,5 +1,9 @@
 import { Type, type Static } from '@sinclair/typebox';
 
+// none: a code is delivered. paypal_email: the app asks for a PayPal address and sends it as
+// recipient_email on POST /redemptions.
+export const RecipientTypeSchema = Type.Union([Type.Literal('none'), Type.Literal('paypal_email')]);
+
 export const CatalogItemResponseSchema = Type.Object({
   id: Type.String(),
   sku: Type.String(),
@@ -14,6 +18,7 @@ export const CatalogItemResponseSchema = Type.Object({
   is_active: Type.Boolean(),
   stock_note: Type.Union([Type.String(), Type.Null()]),
   source: Type.String(),
+  recipient_type: RecipientTypeSchema,
   updated_at: Type.String(),
 });
 export type CatalogItemResponse = Static<typeof CatalogItemResponseSchema>;
@@ -34,6 +39,7 @@ export const PublicCatalogItemSchema = Type.Object({
   image_url: Type.Union([Type.String(), Type.Null()]),
   available: Type.Boolean(),
   stock_note: Type.Union([Type.String(), Type.Null()]),
+  recipient_type: RecipientTypeSchema,
 });
 export type PublicCatalogItem = Static<typeof PublicCatalogItemSchema>;
 
@@ -73,6 +79,7 @@ export const CreateCatalogItemBodySchema = Type.Object({
   regions: Type.Array(Type.String({ minLength: 2, maxLength: 2 }), { minItems: 1 }),
   is_active: Type.Optional(Type.Boolean()),
   stock_note: Type.Optional(Type.String()),
+  recipient_type: Type.Optional(RecipientTypeSchema),
 });
 export type CreateCatalogItemBody = Static<typeof CreateCatalogItemBodySchema>;
 
@@ -86,6 +93,7 @@ export const UpdateCatalogItemBodySchema = Type.Object({
   regions: Type.Optional(Type.Array(Type.String({ minLength: 2, maxLength: 2 }), { minItems: 1 })),
   is_active: Type.Optional(Type.Boolean()),
   stock_note: Type.Optional(Type.String()),
+  recipient_type: Type.Optional(RecipientTypeSchema),
 });
 export type UpdateCatalogItemBody = Static<typeof UpdateCatalogItemBodySchema>;
 
