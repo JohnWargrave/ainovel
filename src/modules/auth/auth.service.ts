@@ -23,6 +23,7 @@ import type { AuthProviders } from './ports.js';
 import type { AuthEmailSender } from './auth-email.js';
 import { recordAuthEvent, type AuthEventContext } from './auth-events.js';
 import { getCoinRewardSettingsInTransaction } from '../config/coin-reward-settings.service.js';
+import { activeBoost, type ActiveBoost } from '../spin/boost.service.js';
 
 const RECOVER_RATE_LIMIT_WINDOW_S = 3_600;
 const RECOVER_RATE_LIMIT_MAX = 5;
@@ -1260,6 +1261,7 @@ export async function getUserProfile(userId: string): Promise<{
   region_id: string;
   referral_code: string | null;
   wallet: { available_coin: string; pending_coin: string };
+  active_boost: ActiveBoost | null;
 }> {
   const row = await db
     .selectFrom('users')
@@ -1294,5 +1296,6 @@ export async function getUserProfile(userId: string): Promise<{
       available_coin: row.available_coin,
       pending_coin: row.pending_coin,
     },
+    active_boost: await activeBoost(db, userId),
   };
 }

@@ -692,13 +692,15 @@ Response 200:
   "trust_level": 0,
   "region_id": "VN",
   "referral_code": "K7Q2MX",
-  "wallet": { "available_coin": "1000", "pending_coin": "0" }
+  "wallet": { "available_coin": "1000", "pending_coin": "0" },
+  "active_boost": { "multiplier": 2, "expires_at": "2026-10-14T09:30:00.000Z" }
 }
 ```
 
 - `username`: username mật khẩu (lowercase) nếu có; nếu không là tên hiển thị suy ra từ id: `Player_` + 6 ký tự hex cuối của id.
 - `avatar_url`: hiện luôn `null`.
 - `wallet.available_coin` / `pending_coin`: **string** (bigint), parse bằng số nguyên lớn. `pending_coin` là coin đang chờ xác nhận, chưa dùng được.
+- `active_boost`: boost thưởng đọc đang chạy (giải "×2 boost" của Lucky Spin), hoặc `null`. Trong khoảng này, thưởng đọc chương được nhân `multiplier`.
 
 Lỗi:
 
@@ -1193,6 +1195,7 @@ Response `200`:
   "required_seconds": 312,
   "scroll_ratio": 0.42,
   "reward_eligible": true,
+  "boost_multiplier": 1,
   "rewarded": false,
   "credited_coin": 0,
   "new_balance": "1250",
@@ -1204,6 +1207,7 @@ Response `200`:
 - `required_seconds`: ngưỡng thời gian cần đạt (cùng công thức với `reward.required_seconds`).
 - `scroll_ratio`: max scroll server đã ghi nhận.
 - `reward_eligible`: chương có thể trả thưởng không (`false` với VIP hoặc khi region tắt thưởng).
+- `boost_multiplier`: `1` bình thường; `> 1` khi user đang có boost (xem `active_boost` ở `GET /me`). Thưởng chương = `chapter_reward_coin × boost_multiplier`, tính tại nhịp trả thưởng.
 - `rewarded`: `true` **đúng một lần** — ở nhịp vừa cộng coin. App dùng field này để chạy animation thưởng. Các nhịp sau trên cùng chương trả `false`.
 - `credited_coin`: số coin cộng ở nhịp này (0 nếu không cộng).
 - `new_balance`: số dư `available` hiện tại (string), có ở mọi nhịp.
@@ -1906,7 +1910,8 @@ Response `200`:
   ],
   "prizes_display": [
     { "slot": 1, "type": "coin", "value": "10", "tier": "low", "label": "10 coin", "pct": 45.5 }
-  ]
+  ],
+  "active_boost": null
 }
 ```
 
@@ -1916,6 +1921,8 @@ Response `200`:
 - `free_spin_available`: hôm nay chưa quay free. Không phụ thuộc quota ad.
 - `spins_today`, `daily_cap` chỉ tính lượt paid.
 - `paid_prizes_display` / `free_prizes_display`: bảng giải của từng loại. `prizes_display` là alias của bảng paid dành cho client cũ. `value` là string. `pct` là xác suất cơ bản (%, làm tròn 1 chữ số thập phân). Pity có thể tăng tỉ lệ tier `high` (×3 trọng số) sau một chuỗi lượt paid không trúng high hoặc jackpot. `type` gồm `coin` | `voucher` | `boost`, `tier` gồm `low` | `mid` | `high` | `jackpot`.
+- Giải `boost` có `value` dạng `"<hệ số>x<số phút>"`, ví dụ `"2x60"` = thưởng đọc ×2 trong 60 phút. `label` mặc định `"×2 boost"`.
+- `active_boost`: boost đang chạy `{ multiplier, expires_at }` hoặc `null` (giống `GET /me`).
 
 Lỗi:
 
@@ -1952,6 +1959,7 @@ Response `200`:
 
 - `prize_slot` khớp với `slot` trong bảng giải để app dừng vòng quay đúng ô.
 - `prize_value` là string. Nếu giải bằng 0 coin, số dư không đổi.
+- Khi trúng giải `boost`: không cộng coin, response có thêm `"boost": { "multiplier": 2, "expires_at": "…" }`. Nếu user đang có boost chạy, boost mới được **xếp hàng sau** boost hiện tại (bắt đầu khi boost cũ hết hạn), nên `expires_at` có thể xa hơn 60 phút.
 
 Lỗi:
 
@@ -1961,7 +1969,7 @@ Lỗi:
 - `403 SPIN_SUSPENDED`.
 - `404 FEATURE_DISABLED` / `404 USER_NOT_FOUND` / `404 WALLET_NOT_FOUND`.
 - `429 DAILY_CAP_REACHED`: đã hết `daily_cap` lượt paid hôm nay.
-- `503 SPIN_PRIZE_UNSUPPORTED`: trúng ô giải không phải coin (voucher/boost chưa hỗ trợ). Toàn bộ giao dịch rollback và intent **chưa** bị tiêu.
+- `503 SPIN_PRIZE_UNSUPPORTED`: trúng ô giải `voucher` (chưa hỗ trợ). Toàn bộ giao dịch rollback và intent **chưa** bị tiêu.
 - `500 SPIN_CONFIG_*`: lỗi config.
 
 ### `POST /spin/free`

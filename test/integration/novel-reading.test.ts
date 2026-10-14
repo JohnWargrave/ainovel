@@ -27,6 +27,7 @@ interface HeartbeatBody {
   required_seconds: number;
   scroll_ratio: number;
   reward_eligible: boolean;
+  boost_multiplier: number;
   rewarded: boolean;
   credited_coin: number;
   new_balance: string;
@@ -264,6 +265,41 @@ describe('novel reading and unlocks', () => {
       const again = await beat(userId, chapterId);
       expect(again.rewarded).toBe(false);
       expect(await creditRows(userId)).toEqual([{ entry_type: 'NOVEL_READ_CREDIT', amount: '10' }]);
+    });
+
+    it('multiplies the chapter reward while a boost is running', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      at(START);
+      const userId = await createUser(await createRegion());
+      const { chapterIds } = await createNovel({ chapters: 2 });
+      await db
+        .insertInto('user_boosts')
+        .values({
+          id: uuidv7(),
+          user_id: userId,
+          multiplier: 2,
+          starts_at: new Date(START),
+          expires_at: new Date(Date.parse(START) + 100_000),
+          source: 'spin',
+          source_id: null,
+        })
+        .execute();
+
+      const boosted = chapterIds[0] ?? '';
+      expect((await beat(userId, boosted)).boost_multiplier).toBe(2);
+      at(plus(30));
+      await beat(userId, boosted);
+      at(plus(60));
+      expect(await beat(userId, boosted)).toMatchObject({ rewarded: true, credited_coin: 20 });
+
+      // Past the boost window the next chapter pays the plain rate.
+      const plain = chapterIds[1] ?? '';
+      at(plus(120));
+      expect((await beat(userId, plain)).boost_multiplier).toBe(1);
+      at(plus(150));
+      await beat(userId, plain);
+      at(plus(180));
+      expect(await beat(userId, plain)).toMatchObject({ rewarded: true, credited_coin: 10 });
     });
 
     it('caps one beat so a backgrounded app cannot bank the whole gap', async () => {

@@ -33,6 +33,7 @@ interface SpinStateResponseBody {
   paid_prizes_display: Record<string, unknown>[];
   free_prizes_display: Record<string, unknown>[];
   prizes_display: Record<string, unknown>[];
+  active_boost: { multiplier: number; expires_at: string } | null;
 }
 
 interface SpinResponseBody {
@@ -40,6 +41,7 @@ interface SpinResponseBody {
   prize_type: string;
   prize_value: string;
   new_balance: string;
+  boost?: { multiplier: number; expires_at: string };
 }
 
 async function createRegion(regionId: string, spin: Record<string, unknown>): Promise<void> {
@@ -130,6 +132,16 @@ async function createPityConfig(): Promise<string> {
   await sql`
     INSERT INTO spin_config (id, name, ticket_coin, max_ev_coin, daily_cap, pity_threshold, prizes)
     VALUES (${id}, ${`Pity test ${randomUUID()}`}, 0, 95, 20, 1, ${JSON.stringify(prizes)}::jsonb)
+  `.execute(db);
+  return id;
+}
+
+async function createBoostConfig(): Promise<string> {
+  const id = uuidv7();
+  const prizes = [{ slot: 1, type: 'boost', value: '2x60', weight: 1, tier: 'mid' }];
+  await sql`
+    INSERT INTO spin_config (id, name, ticket_coin, max_ev_coin, daily_cap, pity_threshold, prizes)
+    VALUES (${id}, ${`Boost test ${randomUUID()}`}, 0, 95, 20, 0, ${JSON.stringify(prizes)}::jsonb)
   `.execute(db);
   return id;
 }
@@ -525,6 +537,56 @@ describe('lucky spin', () => {
     const res = await spin(app, tokenFor(userId), await verifiedIntent(userId, { regionId }));
     expect(res.statusCode).toBe(404);
     expect(res.json<ErrorResponseBody>().error.code).toBe('FEATURE_DISABLED');
+  });
+
+  it('grants a boost prize, queueing a second one behind the first', async () => {
+    const configId = await createBoostConfig();
+    const regionId = `SPIN_BOOST_${randomUUID()}`;
+    await createRegion(regionId, {
+      enabled: true,
+      table_id: configId,
+      free_table_id: FREE_CONFIG_ID,
+      timezone: 'UTC',
+    });
+    const userId = await createTestUser({ region_id: regionId, available_coin: 100 });
+
+    const first = await spin(app, tokenFor(userId), await verifiedIntent(userId, { regionId }));
+    expect(first.statusCode).toBe(200);
+    const firstBody = first.json<SpinResponseBody>();
+    expect(firstBody).toMatchObject({ prize_type: 'boost', prize_value: '2x60', new_balance: '100' });
+    const firstEnd = Date.parse(firstBody.boost?.expires_at ?? '');
+    expect(firstEnd - Date.now()).toBeGreaterThan(59 * 60_000);
+    expect(firstEnd - Date.now()).toBeLessThanOrEqual(60 * 60_000);
+
+    const second = await spin(app, tokenFor(userId), await verifiedIntent(userId, { regionId }));
+    expect(second.statusCode).toBe(200);
+    const secondEnd = Date.parse(second.json<SpinResponseBody>().boost?.expires_at ?? '');
+    expect(secondEnd - firstEnd).toBe(60 * 60_000);
+
+    const state = await app.inject({
+      method: 'GET',
+      url: '/spin/state',
+      headers: { ...APP_HEADERS, authorization: `Bearer ${tokenFor(userId)}` },
+    });
+    // The queued boost has not started, so the active window is still the first one.
+    expect(state.json<SpinStateResponseBody>().active_boost).toEqual({
+      multiplier: 2,
+      expires_at: new Date(firstEnd).toISOString(),
+    });
+
+    const me = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: { ...APP_HEADERS, authorization: `Bearer ${tokenFor(userId)}` },
+    });
+    expect(me.json<{ active_boost: unknown }>().active_boost).toMatchObject({ multiplier: 2 });
+
+    const ledger = await db
+      .selectFrom('coin_ledger')
+      .select('id')
+      .where('user_id', '=', userId)
+      .execute();
+    expect(ledger).toHaveLength(0);
   });
 
   it('records pity_applied after the configured low-streak threshold', async () => {

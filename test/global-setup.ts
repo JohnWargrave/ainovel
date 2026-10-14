@@ -27,6 +27,7 @@ const DATA_TABLES = [
   'redemptions',
   'redemption_status_history',
   'spin_history',
+  'user_boosts',
   'fraud_flags',
   'audit_log',
   'inbox_messages',

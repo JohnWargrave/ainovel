@@ -155,6 +155,8 @@ export const ReadHeartbeatResponseSchema = Type.Object({
   required_seconds: Type.Integer(),
   scroll_ratio: Type.Number(),
   reward_eligible: Type.Boolean(),
+  // 1 normally; >1 while a lucky-spin boost runs, in which case the chapter reward is multiplied.
+  boost_multiplier: Type.Integer(),
   // True on exactly one beat: the one that credited. The app fires its reward animation off this.
   rewarded: Type.Boolean(),
   credited_coin: Type.Integer(),

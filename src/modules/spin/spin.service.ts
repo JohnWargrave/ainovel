@@ -9,6 +9,7 @@ import { creditInTransaction } from '../wallet-ledger/ledger.service.js';
 import { buildState } from '../rewarded-ads/intent.service.js';
 import { getRewardedAdsFeature } from '../rewarded-ads/region-feature.js';
 import { getSpinFeature, type SpinFeature } from './region-feature.js';
+import { activeBoost, grantBoostInTransaction, parseBoostValue } from './boost.service.js';
 import type { SpinResponse, SpinStateResponse } from './schemas.js';
 
 const RED_FRAUD_THRESHOLD = 70;
@@ -124,13 +125,22 @@ function validatePrizeTable(raw: unknown, maxEvCoin: number, mode: SpinMode): Sp
     if (typeof value !== 'string' || value.length === 0) {
       throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
     }
+    const boost = type === 'boost' ? parseBoostValue(value) : null;
+    if (type === 'boost' && !boost) {
+      throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
+    }
     return {
       slot,
       type,
       tier,
       value,
       weight,
-      label: typeof entry['label'] === 'string' ? entry['label'] : value,
+      label:
+        typeof entry['label'] === 'string'
+          ? entry['label']
+          : boost
+            ? `×${String(boost.multiplier)} boost`
+            : value,
     };
   });
   const ev = expectedValue(prizes);
@@ -327,6 +337,7 @@ export async function getSpinState(userId: string): Promise<SpinStateResponse> {
       paid_prizes_display: prizeDisplay(config.prizes),
       free_prizes_display: prizeDisplay(freeConfig.prizes),
       prizes_display: prizeDisplay(config.prizes),
+      active_boost: await activeBoost(trx, userId),
     };
   });
 }
@@ -418,14 +429,28 @@ async function performSpin(
     const rollResult = roll();
     const prize = selectPrize(adjustedPrizes, rollResult.rollFraction);
 
-    if (prize.type !== 'coin') {
+    if (prize.type === 'voucher') {
       throw new AppError(
         'SPIN_PRIZE_UNSUPPORTED',
         'This spin prize type is not available yet',
         503,
       );
     }
-    if (typeof prize.value === 'number' && prize.value > 0) {
+    let boost: SpinResponse['boost'];
+    if (prize.type === 'boost') {
+      // Validated at config load, so this cannot be null here.
+      const parsed = parseBoostValue(String(prize.value));
+      if (!parsed) {
+        throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
+      }
+      boost = await grantBoostInTransaction(trx, {
+        userId,
+        multiplier: parsed.multiplier,
+        minutes: parsed.minutes,
+        source: 'spin',
+        sourceId: spinHistoryId,
+      });
+    } else if (typeof prize.value === 'number' && prize.value > 0) {
       const credit = await creditInTransaction(trx, {
         userId,
         entryType: mode === 'paid' ? 'SPIN_PRIZE_CREDIT' : 'FREE_SPIN_PRIZE_CREDIT',
@@ -475,6 +500,7 @@ async function performSpin(
       prize_type: prize.type,
       prize_value: String(prize.value),
       new_balance: newBalance,
+      ...(boost ? { boost } : {}),
     };
   });
 }

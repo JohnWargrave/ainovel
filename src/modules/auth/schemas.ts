@@ -148,5 +148,9 @@ export const MeResponseSchema = Type.Object({
     available_coin: Type.String(),
     pending_coin: Type.String(),
   }),
+  active_boost: Type.Union([
+    Type.Object({ multiplier: Type.Integer(), expires_at: Type.String() }),
+    Type.Null(),
+  ]),
 });
 export type MeResponse = Static<typeof MeResponseSchema>;

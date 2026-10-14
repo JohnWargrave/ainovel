@@ -7,6 +7,7 @@ import { lockRedis } from '../../redis/index.js';
 import { creditInTransaction } from '../wallet-ledger/ledger.service.js';
 import { recordMint } from '../wallet-ledger/economy-counters.js';
 import { loadUserRegionFeatures } from '../earning/region-features.js';
+import { activeBoost } from '../spin/boost.service.js';
 import {
   chapterLockedError,
   findReadableChapter,
@@ -163,11 +164,15 @@ export async function recordReadHeartbeat(
     const rewardEligible = !vip && feature.enabled && feature.chapter_reward_coin > 0;
     const rewardedToday = await countRewardedToday(trx, userId, timezone, now);
     const remainingToday = Math.max(feature.chapter_reward_daily_cap - rewardedToday, 0);
+    // Read on every beat so the reader can show "×2" while a boost runs, not only on the paying one.
+    const boost = await activeBoost(trx, userId, now);
+    const multiplier = boost?.multiplier ?? 1;
     const base = {
       read_seconds: readTimeS,
       required_seconds: requiredS,
       scroll_ratio: scrollRatio,
       reward_eligible: rewardEligible,
+      boost_multiplier: multiplier,
     };
     const unpaid = {
       response: {
@@ -187,15 +192,16 @@ export async function recordReadHeartbeat(
       return unpaid;
     }
 
+    const rewardCoin = feature.chapter_reward_coin * multiplier;
     const ledger = await creditInTransaction(trx, {
       userId,
       entryType: 'NOVEL_READ_CREDIT',
-      amount: feature.chapter_reward_coin,
+      amount: rewardCoin,
       refType: 'novel_chapter',
       refId: chapter.id,
       // Keyed on the chapter, so even a duplicate progress row could never pay twice.
       idempotencyKey: `novel-read:${userId}:${chapter.id}`,
-      note: 'Chapter reading reward',
+      note: multiplier > 1 ? `Chapter reading reward ×${String(multiplier)}` : 'Chapter reading reward',
     });
     await trx
       .updateTable('novel_read_progress')
@@ -208,7 +214,7 @@ export async function recordReadHeartbeat(
       response: {
         ...base,
         rewarded: true,
-        credited_coin: feature.chapter_reward_coin,
+        credited_coin: rewardCoin,
         new_balance: ledger.balanceAfter,
         daily_remaining: Math.max(remainingToday - 1, 0),
       },

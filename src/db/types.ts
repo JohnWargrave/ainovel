@@ -464,6 +464,18 @@ interface NovelReadProgressTable {
   created_at: GeneratedTimestamp;
 }
 
+// Time-boxed reward multipliers (lucky-spin "×2 boost") — see migration 1700000000068.
+interface UserBoostsTable {
+  id: string;
+  user_id: string;
+  multiplier: number;
+  starts_at: Timestamp;
+  expires_at: Timestamp;
+  source: string;
+  source_id: string | null;
+  created_at: GeneratedTimestamp;
+}
+
 interface NovelLibraryTable {
   user_id: string;
   novel_id: string;
@@ -613,6 +625,7 @@ export interface DB {
   novel_import_chapters: NovelImportChaptersTable;
   spin_config: SpinConfigTable;
   spin_history: SpinHistoryTable;
+  user_boosts: UserBoostsTable;
   fraud_flags: FraudFlagsTable;
   audit_log: AuditLogTable;
   inbox_messages: InboxMessagesTable;
