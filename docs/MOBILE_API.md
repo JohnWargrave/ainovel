@@ -1858,12 +1858,15 @@ Lỗi:
 
 ## 11. Vòng quay (Spin)
 
-**Mọi lượt quay (cả paid lẫn free) đều phải xem rewarded ad trước.** Không trừ coin (`ticket_coin` luôn `"0"`). Luồng:
+**Lượt paid phải xem rewarded ad trước; lượt free mỗi ngày không cần quảng cáo.** Không trừ coin (`ticket_coin` luôn `"0"`). Luồng cho lượt paid:
 
 1. `POST /earning/rewarded-ad/intent` với `placement: "luckyspin"` để nhận `intent_id` (TTL 10 phút, xem mục Rewarded Ads).
 2. Hiển thị AdMob rewarded ad với `custom_data` = giá trị SSV do intent trả về.
 3. AdMob gọi SSV callback về server, intent chuyển sang `consumed`.
-4. Gọi `POST /spin` hoặc `POST /spin/free` với `intent_id`. Mỗi intent chỉ dùng được **1 lần**.
+4. Gọi `POST /spin` với `intent_id`. Mỗi intent chỉ dùng được **1 lần**.
+
+Lượt free: gọi thẳng `POST /spin/free` (không body).
+
 
 Nếu app gọi `/spin` trước khi SSV kịp tới, server trả `403 AD_NOT_VERIFIED`. Đây là lỗi tạm thời: **retry sau vài giây** với cùng `intent_id`. Ngày reset theo timezone của config spin trong region.
 
@@ -1910,7 +1913,7 @@ Response `200`:
 - `ticket_coin` luôn `"0"` (giữ lại để tương thích).
 - `spins_remaining` = min(`daily_cap − spins_today`, `ads_remaining`). Đây là số lượt user thật sự còn quay được.
 - `ads_remaining` / `next_ad_available_at`: quota và cooldown của placement `luckyspin`. Field sau là ISO string hoặc `null` nếu không bị cooldown.
-- `free_spin_available`: còn lượt free hôm nay **và** còn quota ad.
+- `free_spin_available`: hôm nay chưa quay free. Không phụ thuộc quota ad.
 - `spins_today`, `daily_cap` chỉ tính lượt paid.
 - `paid_prizes_display` / `free_prizes_display`: bảng giải của từng loại. `prizes_display` là alias của bảng paid dành cho client cũ. `value` là string. `pct` là xác suất cơ bản (%, làm tròn 1 chữ số thập phân). Pity có thể tăng tỉ lệ tier `high` (×3 trọng số) sau một chuỗi lượt paid không trúng high hoặc jackpot. `type` gồm `coin` | `voucher` | `boost`, `tier` gồm `low` | `mid` | `high` | `jackpot`.
 
@@ -1963,14 +1966,17 @@ Lỗi:
 
 ### `POST /spin/free`
 
-Lượt quay **free** mỗi ngày (vẫn cần ad `luckyspin`). Giải được ghi thành `FREE_SPIN_PRIZE_CREDIT` (unbacked). **Auth:** Bearer. **Headers:** App headers.
+Lượt quay **free** mỗi ngày, **không cần xem quảng cáo**. Giải được ghi thành `FREE_SPIN_PRIZE_CREDIT` (unbacked). **Auth:** Bearer. **Headers:** App headers. **Rate limit:** 10 request/60s/user.
 
-Body và Response giống hệt `POST /spin` (bảng giải dùng `free_prizes_display`).
+Body: không bắt buộc. Có thể bỏ trống, gửi `{}`, hoặc gửi `{ "intent_id": "…" }` (build cũ có xem ad trước lượt free). Nếu có `intent_id` thì intent được kiểm tra và tiêu như ở `POST /spin`.
+
+Response giống hệt `POST /spin` (bảng giải dùng `free_prizes_display`).
 
 Lỗi: giống `POST /spin`, chỉ khác:
 
 - Thay `429 DAILY_CAP_REACHED` bằng `429 FREE_SPIN_ALREADY_CLAIMED`: hôm nay đã quay free.
-- Có thể gặp thêm `429 UNBACKED_CAP_EXCEEDED` / `429 MINT_PAUSED`.
+- `403 AD_NOT_VERIFIED` chỉ xảy ra khi có gửi `intent_id`.
+- Có thể gặp thêm `429 RATE_LIMITED` / `429 UNBACKED_CAP_EXCEEDED` / `429 MINT_PAUSED`.
 
 ### `GET /spin/recent-wins`
 

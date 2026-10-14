@@ -30,6 +30,14 @@ export const SpinBodySchema = Type.Object({
 });
 export type SpinBody = Static<typeof SpinBodySchema>;
 
+// The daily free spin needs no ad. An intent is still accepted (and burned) so builds that show an
+// ad before the free spin keep working. Null admits a bodyless POST, as IntentBodySchema does.
+export const FreeSpinBodySchema = Type.Union([
+  Type.Object({ intent_id: Type.Optional(Type.String({ format: 'uuid' })) }),
+  Type.Null(),
+]);
+export type FreeSpinBody = Static<typeof FreeSpinBodySchema>;
+
 export const SpinStateResponseSchema = Type.Object({
   // Always "0" since spins became ad-funded. Retained so clients that read it keep parsing.
   ticket_coin: Type.String(),

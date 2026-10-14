@@ -320,7 +320,8 @@ export async function getSpinState(userId: string): Promise<SpinStateResponse> {
       daily_cap: config.dailyCap,
       ads_remaining: adState.rewards_remaining,
       next_ad_available_at: adState.next_available_at,
-      free_spin_available: freeSpinsToday === 0 && adState.rewards_remaining > 0,
+      // The free spin needs no ad, so the luckyspin quota does not gate it.
+      free_spin_available: freeSpinsToday === 0,
       reset_at: paidWindow.end.toISOString(),
       odds_disclosure: feature.oddsDisclosure,
       paid_prizes_display: prizeDisplay(config.prizes),
@@ -330,9 +331,10 @@ export async function getSpinState(userId: string): Promise<SpinStateResponse> {
   });
 }
 
-// Every spin — free or paid — is funded by a rewarded ad. The intent is the server's only proof
-// that the ad was actually watched: the app used to gate spins on a client-side boolean, which meant
-// calling POST /spin directly skipped the ad entirely.
+// Every paid spin is funded by a rewarded ad. The intent is the server's only proof that the ad was
+// actually watched: the app used to gate spins on a client-side boolean, which meant calling POST
+// /spin directly skipped the ad entirely. The daily free spin needs no ad, but if the client sends an
+// intent anyway it goes through the same check.
 async function assertSpinAdIntent(
   trx: Transaction<DB>,
   userId: string,
@@ -376,7 +378,7 @@ function adNotVerified(): AppError {
 async function performSpin(
   userId: string,
   mode: SpinMode,
-  intentId: string,
+  intentId: string | undefined,
 ): Promise<SpinResponse> {
   return db.transaction().execute(async (trx) => {
     const user = await loadUserForSpin(userId, trx);
@@ -385,7 +387,9 @@ async function performSpin(
     const spinHistoryId = uuidv7();
     const today = dayWindow(feature.timezone);
 
-    await assertSpinAdIntent(trx, userId, intentId);
+    if (intentId !== undefined) {
+      await assertSpinAdIntent(trx, userId, intentId);
+    }
 
     const wallet = await trx
       .selectFrom('wallets')
@@ -454,14 +458,16 @@ async function performSpin(
     // Burns the intent. assertSpinAdIntent already holds a row lock, so a concurrent request blocks
     // there and re-reads a spent intent — but this is where a free spin would be minted if that ever
     // stopped holding, so the zero-row case aborts the transaction rather than passing silently.
-    const burned = await trx
-      .updateTable('rewarded_ad_intents')
-      .set({ spin_history_id: spinHistoryId })
-      .where('id', '=', intentId)
-      .where('spin_history_id', 'is', null)
-      .executeTakeFirst();
-    if (burned.numUpdatedRows === 0n) {
-      throw new AppError('AD_NOT_VERIFIED', 'This rewarded ad has already been spent', 403);
+    if (intentId !== undefined) {
+      const burned = await trx
+        .updateTable('rewarded_ad_intents')
+        .set({ spin_history_id: spinHistoryId })
+        .where('id', '=', intentId)
+        .where('spin_history_id', 'is', null)
+        .executeTakeFirst();
+      if (burned.numUpdatedRows === 0n) {
+        throw new AppError('AD_NOT_VERIFIED', 'This rewarded ad has already been spent', 403);
+      }
     }
 
     return {
@@ -477,6 +483,9 @@ export async function performPaidSpin(userId: string, intentId: string): Promise
   return performSpin(userId, 'paid', intentId);
 }
 
-export async function performFreeSpin(userId: string, intentId: string): Promise<SpinResponse> {
+export async function performFreeSpin(
+  userId: string,
+  intentId: string | undefined,
+): Promise<SpinResponse> {
   return performSpin(userId, 'free', intentId);
 }

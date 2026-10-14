@@ -378,9 +378,13 @@ describe('lucky spin', () => {
     expect(intent.spin_history_id).toBeNull();
   });
 
-  it('performs one free spin per day, still requiring an ad', async () => {
+  it('performs one free spin per day without an ad', async () => {
     const userId = await createTestUser({ available_coin: 0 });
-    const res = await spin(app, tokenFor(userId), await verifiedIntent(userId), '/spin/free');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/spin/free',
+      headers: { ...APP_HEADERS, authorization: `Bearer ${tokenFor(userId)}` },
+    });
     expect(res.statusCode).toBe(200);
     const body = res.json<SpinResponseBody>();
 
@@ -423,9 +427,56 @@ describe('lucky spin', () => {
       free_spin_available: false,
     });
 
-    const second = await spin(app, tokenFor(userId), await verifiedIntent(userId), '/spin/free');
+    const second = await app.inject({
+      method: 'POST',
+      url: '/spin/free',
+      headers: { ...APP_HEADERS, authorization: `Bearer ${tokenFor(userId)}` },
+      payload: {},
+    });
     expect(second.statusCode).toBe(429);
     expect(second.json<ErrorResponseBody>().error.code).toBe('FREE_SPIN_ALREADY_CLAIMED');
+  });
+
+  it('still accepts and burns an intent on the free spin for older builds', async () => {
+    const userId = await createTestUser({ available_coin: 0 });
+    const intentId = await verifiedIntent(userId);
+    const res = await spin(app, tokenFor(userId), intentId, '/spin/free');
+    expect(res.statusCode).toBe(200);
+
+    const intent = await db
+      .selectFrom('rewarded_ad_intents')
+      .select('spin_history_id')
+      .where('id', '=', intentId)
+      .executeTakeFirstOrThrow();
+    expect(intent.spin_history_id).not.toBeNull();
+
+    const replayUser = await createTestUser({ available_coin: 0 });
+    const unverified = await spin(
+      app,
+      tokenFor(replayUser),
+      await verifiedIntent(replayUser, { status: 'pending' }),
+      '/spin/free',
+    );
+    expect(unverified.statusCode).toBe(403);
+    expect(unverified.json<ErrorResponseBody>().error.code).toBe('AD_NOT_VERIFIED');
+  });
+
+  it('offers the free spin even when the luckyspin ad quota is used up', async () => {
+    const userId = await createTestUser();
+    for (let i = 0; i < 20; i += 1) {
+      await verifiedIntent(userId, { status: 'pending' });
+    }
+    const state = await app.inject({
+      method: 'GET',
+      url: '/spin/state',
+      headers: { ...APP_HEADERS, authorization: `Bearer ${tokenFor(userId)}` },
+    });
+    expect(state.statusCode).toBe(200);
+    expect(state.json<SpinStateResponseBody>()).toMatchObject({
+      ads_remaining: 0,
+      spins_remaining: 0,
+      free_spin_available: true,
+    });
   });
 
   it('counts free-spin coin against the rolling unbacked cap', async () => {
