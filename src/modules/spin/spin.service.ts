@@ -15,13 +15,13 @@ import type { SpinResponse, SpinStateResponse } from './schemas.js';
 const RED_FRAUD_THRESHOLD = 70;
 const ROLL_DENOMINATOR = 2 ** 48;
 const VALID_PRIZE_TYPES = ['coin', 'voucher', 'boost'] as const;
-const VALID_TIERS = ['low', 'mid', 'high', 'jackpot'] as const;
+export const VALID_TIERS = ['low', 'mid', 'high', 'jackpot'] as const;
 
 type PrizeType = (typeof VALID_PRIZE_TYPES)[number];
 type PrizeTier = (typeof VALID_TIERS)[number];
-type SpinMode = 'paid' | 'free';
+export type SpinMode = 'paid' | 'free';
 
-interface SpinPrize {
+export interface SpinPrize {
   slot: number;
   type: PrizeType;
   value: number | string;
@@ -58,28 +58,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function assertInteger(value: unknown, code: string): number {
-  if (typeof value !== 'number' || !Number.isInteger(value)) {
-    throw new AppError(code, 'Spin config is malformed', 500);
-  }
-  return value;
+// Every failure carries SPIN_CONFIG_MALFORMED (a 500 when a stored table is broken at spin time);
+// the message names the slot and rule so the CMS can show an operator what to fix.
+function malformed(message: string): AppError {
+  return new AppError('SPIN_CONFIG_MALFORMED', message, 500);
 }
 
-function assertPrizeType(value: unknown): PrizeType {
-  if (typeof value === 'string' && VALID_PRIZE_TYPES.includes(value as PrizeType)) {
-    return value as PrizeType;
-  }
-  throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
-}
+// The free table pays out a narrow band, not just a ceiling: a free spin that averages next to
+// nothing reads as broken, one that averages more than a paid spin undercuts the ad.
+export const FREE_TABLE_EV_MIN = 30;
+export const FREE_TABLE_EV_MAX = 50;
 
-function assertTier(value: unknown): PrizeTier {
-  if (typeof value === 'string' && VALID_TIERS.includes(value as PrizeTier)) {
-    return value as PrizeTier;
-  }
-  throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
-}
-
-function expectedValue(prizes: SpinPrize[]): number {
+export function expectedValue(prizes: readonly SpinPrize[]): number {
   const totalWeight = prizes.reduce((sum, prize) => sum + prize.weight, 0);
   return prizes.reduce((sum, prize) => {
     const coinValue = prize.type === 'coin' && typeof prize.value === 'number' ? prize.value : 0;
@@ -87,70 +77,82 @@ function expectedValue(prizes: SpinPrize[]): number {
   }, 0);
 }
 
-function validatePrizeTable(raw: unknown, maxEvCoin: number, mode: SpinMode): SpinPrize[] {
+export function validatePrizeTable(raw: unknown, maxEvCoin: number, mode: SpinMode): SpinPrize[] {
   if (!Array.isArray(raw) || raw.length === 0) {
-    throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
+    throw malformed('The prize table needs at least one prize');
   }
   const slots = new Set<number>();
-  const prizes = raw.map((entry) => {
-    if (!isRecord(entry)) {
-      throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
+  const prizes = raw.map((entry, index): SpinPrize => {
+    if (!isRecord(entry)) throw malformed(`Prize ${String(index + 1)} is not an object`);
+    const slot = entry['slot'];
+    if (typeof slot !== 'number' || !Number.isInteger(slot) || slot <= 0) {
+      throw malformed(`Prize ${String(index + 1)}: slot must be a positive integer`);
     }
-    const slot = assertInteger(entry['slot'], 'SPIN_CONFIG_MALFORMED');
-    const weight = assertInteger(entry['weight'], 'SPIN_CONFIG_MALFORMED');
-    const type = assertPrizeType(entry['type']);
-    const tier = assertTier(entry['tier']);
-    const value = entry['value'];
-    if (slot <= 0 || weight <= 0 || slots.has(slot)) {
-      throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
-    }
+    const at = `Slot ${String(slot)}`;
+    if (slots.has(slot)) throw malformed(`${at} is used twice`);
     slots.add(slot);
-    if (mode === 'free' && tier === 'jackpot') {
-      throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
+    const weight = entry['weight'];
+    if (typeof weight !== 'number' || !Number.isInteger(weight) || weight <= 0) {
+      throw malformed(`${at}: weight must be a positive integer`);
     }
+    const type = entry['type'];
+    if (typeof type !== 'string' || !VALID_PRIZE_TYPES.includes(type as PrizeType)) {
+      throw malformed(`${at}: type must be one of ${VALID_PRIZE_TYPES.join(', ')}`);
+    }
+    const tier = entry['tier'];
+    if (typeof tier !== 'string' || !VALID_TIERS.includes(tier as PrizeTier)) {
+      throw malformed(`${at}: tier must be one of ${VALID_TIERS.join(', ')}`);
+    }
+    if (mode === 'free' && tier === 'jackpot') {
+      throw malformed(`${at}: the free table cannot have a jackpot prize`);
+    }
+    const label = typeof entry['label'] === 'string' ? entry['label'] : undefined;
+    const value = entry['value'];
     if (type === 'coin') {
-      const coinValue = assertInteger(value, 'SPIN_CONFIG_MALFORMED');
-      if (coinValue < 0) {
-        throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+        throw malformed(`${at}: a coin prize needs a whole, non-negative coin amount`);
       }
       return {
         slot,
         type,
-        tier,
-        value: coinValue,
+        tier: tier as PrizeTier,
+        value,
         weight,
-        label: typeof entry['label'] === 'string' ? entry['label'] : `${String(coinValue)} coin`,
+        label: label ?? `${String(value)} coin`,
       };
     }
     if (typeof value !== 'string' || value.length === 0) {
-      throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
+      throw malformed(`${at}: a ${type} prize needs a text value`);
     }
     const boost = type === 'boost' ? parseBoostValue(value) : null;
     if (type === 'boost' && !boost) {
-      throw new AppError('SPIN_CONFIG_MALFORMED', 'Spin config is malformed', 500);
+      throw malformed(`${at}: a boost is written multiplier x minutes, e.g. 2x60`);
     }
     return {
       slot,
-      type,
-      tier,
+      type: type as PrizeType,
+      tier: tier as PrizeTier,
       value,
       weight,
-      label:
-        typeof entry['label'] === 'string'
-          ? entry['label']
-          : boost
-            ? `×${String(boost.multiplier)} boost`
-            : value,
+      label: label ?? (boost ? `×${String(boost.multiplier)} boost` : value),
     };
   });
   const ev = expectedValue(prizes);
   // Bounded by an explicit column rather than by ticket_coin: the paid table is ad-funded now, its
   // ticket is 0, and `ev >= 0 * 0.95` would reject every non-empty prize table.
   if (mode === 'paid' && ev > maxEvCoin) {
-    throw new AppError('SPIN_CONFIG_EV_INVALID', 'Spin config EV is invalid', 500);
+    throw new AppError(
+      'SPIN_CONFIG_EV_INVALID',
+      `Average payout ${ev.toFixed(1)} coin is above this table's limit of ${String(maxEvCoin)}`,
+      500,
+    );
   }
-  if (mode === 'free' && (ev < 30 || ev > 50)) {
-    throw new AppError('SPIN_CONFIG_EV_INVALID', 'Spin config EV is invalid', 500);
+  if (mode === 'free' && (ev < FREE_TABLE_EV_MIN || ev > FREE_TABLE_EV_MAX)) {
+    throw new AppError(
+      'SPIN_CONFIG_EV_INVALID',
+      `Average payout ${ev.toFixed(1)} coin must be between ${String(FREE_TABLE_EV_MIN)} and ${String(FREE_TABLE_EV_MAX)} for the free table`,
+      500,
+    );
   }
   return prizes;
 }
