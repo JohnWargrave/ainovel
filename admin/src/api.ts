@@ -181,7 +181,33 @@ export interface SpinConfigAdmin {
   daily_cap: number;
   is_active: boolean;
   used_by: Array<{ region_id: string; role: 'paid' | 'free' }>;
+  // Stored as-is, so a table the spin would reject (a voucher, a bad boost) still opens here to be fixed.
+  prizes: SpinPrizeAdmin[];
+  // Average coin per spin (boosts count as 0) and the band the server holds this table to on save.
+  ev_coin: number;
+  ev_min: number | null;
+  ev_max: number;
   updated_at: string;
+}
+export type SpinPrizeType = 'coin' | 'boost' | 'voucher';
+export type SpinPrizeTier = 'low' | 'mid' | 'high' | 'jackpot';
+export interface SpinPrizeAdmin {
+  slot: number;
+  type: string;
+  // Coin amount for coin, "multiplier x minutes" (e.g. "2x60") for boost.
+  value: number | string;
+  // Relative odds: a prize's chance is its weight over the sum of all weights.
+  weight: number;
+  tier: string;
+  label: string | null;
+}
+export interface SpinPrizeInput {
+  slot: number;
+  type: Exclude<SpinPrizeType, 'voucher'>;
+  value: number | string;
+  weight: number;
+  tier: SpinPrizeTier;
+  label?: string;
 }
 export interface SpinConfigsData {
   items: SpinConfigAdmin[];
@@ -710,7 +736,7 @@ export function getSpinConfigs(): Promise<SpinConfigsData> {
 
 export function updateSpinConfig(
   configId: string,
-  input: { daily_cap: number },
+  input: { daily_cap?: number; prizes?: SpinPrizeInput[] },
 ): Promise<SpinConfigAdmin> {
   return api<SpinConfigAdmin>(`/admin/spin/configs/${encodeURIComponent(configId)}`, {
     method: 'PUT',

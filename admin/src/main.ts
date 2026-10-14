@@ -95,6 +95,7 @@ import {
   splitValues,
 } from './format.js';
 import { getNovelSettings, updateNovelSettings, type NovelSettingsData } from './novels-api.js';
+import { clearPrizeDrafts, readPrizes, renderPrizeEditor, wirePrizeEditor } from './spin-prizes.js';
 import { loadNovelsPage, renderNovelsPage, resetNovelsState, type NovelsHost } from './novels.js';
 import {
   loadFeedbackPage,
@@ -2339,7 +2340,7 @@ function rewardedAdsSection(data?: RewardedAdsSettingsData): string {
 function spinSection(data?: SpinConfigsData): string {
   return `<section class="settings-section">
       <div class="settings-section-heading">
-        <div><p class="eyebrow">Lucky spin</p><h3>Paid spins per day</h3></div>
+        <div><p class="eyebrow">Lucky spin</p><h3>Spin tables</h3></div>
       </div>
       <div class="redemption-settings-grid">
         ${(data?.items ?? [])
@@ -2371,6 +2372,7 @@ function spinSection(data?: SpinConfigsData): string {
               </div>
               <p class="muted">Used by — ${escapeHtml(usageLabel)}. The free spin stays one per day and ignores this cap.</p>
               ${paidRegions.length === 0 ? '<div class="config-warning">No region uses this table for paid spins, so this cap has no effect today.</div>' : ''}
+              ${renderPrizeEditor(config)}
               <div class="form-actions">
                 <button type="submit">Save table</button>
                 <span class="muted">Updated ${formatDate(config.updated_at)}</span>
@@ -2658,19 +2660,30 @@ function renderSettings(
   });
 
   document.querySelectorAll<HTMLFormElement>('[data-spin-config]').forEach((form) => {
+    wirePrizeEditor(form);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       const configId = form.dataset['spinConfig'];
       if (!configId || !spinConfigs) return;
       const values = new FormData(form);
+      const prizes = readPrizes(configId);
       void runAction(
-        () => updateSpinConfig(configId, { daily_cap: Number(values.get('daily_cap')) }),
-        (updated) => ({
-          spinConfigs: {
-            ...spinConfigs,
-            items: spinConfigs.items.map((config) => (config.id === updated.id ? updated : config)),
-          },
-        }),
+        () =>
+          updateSpinConfig(configId, {
+            daily_cap: Number(values.get('daily_cap')),
+            ...(prizes ? { prizes } : {}),
+          }),
+        (updated) => {
+          clearPrizeDrafts(updated.id);
+          return {
+            spinConfigs: {
+              ...spinConfigs,
+              items: spinConfigs.items.map((config) =>
+                config.id === updated.id ? updated : config,
+              ),
+            },
+          };
+        },
       );
     });
   });
@@ -2726,6 +2739,7 @@ async function loadPage(page: Page): Promise<void> {
       setState({ redemptions: await listRedemptions({}), loading: false });
     }
     if (page === 'settings') {
+      clearPrizeDrafts();
       const [
         coinRewardSettings,
         redemptionSettings,
