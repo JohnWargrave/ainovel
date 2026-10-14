@@ -229,57 +229,128 @@ async function runAction<T>(
   }
 }
 
+// Outline icons (24px grid, 1.8 stroke) in the Ant Design spirit; inline so the CMS ships no icon font.
+const ICON_PATHS: Record<string, string> = {
+  dashboard: 'M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 9h8V3h-8z',
+  offers:
+    'M20 12v9H4v-9M2 7h20v5H2zM12 21V7M12 7H7.5a2.5 2.5 0 1 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 1 0 0-5C13 2 12 7 12 7z',
+  monitor: 'M3 3v18h18M7 15l4-4 3 3 5-6',
+  users:
+    'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+  referrals:
+    'M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM8.6 13.5l6.8 4M15.4 6.5l-6.8 4',
+  redemptions: 'M21 4H3v16h18zM3 10h18M7 15h4',
+  novels:
+    'M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5',
+  settings:
+    'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
+  audit:
+    'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8',
+  fold: 'M3 6h18M3 12h12M3 18h18M21 9l-3 3 3 3',
+  unfold: 'M3 6h18M9 12h12M3 18h18M3 9l3 3-3 3',
+  logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+};
+
+function icon(name: string): string {
+  return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON_PATHS[name] ?? ''}"/></svg>`;
+}
+
+const PAGE_META: Record<Page, { label: string; icon: string; group: string }> = {
+  dashboard: { label: 'Dashboard', icon: 'dashboard', group: 'Overview' },
+  novels: { label: 'Novels', icon: 'novels', group: 'Content' },
+  offers: { label: 'Offers', icon: 'offers', group: 'Earning' },
+  'tapjoy-monitor': { label: 'Tapjoy', icon: 'monitor', group: 'Earning' },
+  'pubscale-monitor': { label: 'PubScale', icon: 'monitor', group: 'Earning' },
+  users: { label: 'Users', icon: 'users', group: 'Users & growth' },
+  referrals: { label: 'Referrals', icon: 'referrals', group: 'Users & growth' },
+  redemptions: { label: 'Redemptions', icon: 'redemptions', group: 'Users & growth' },
+  settings: { label: 'Settings', icon: 'settings', group: 'System' },
+  audit: { label: 'Audit log', icon: 'audit', group: 'System' },
+};
+
+const SIDER_COLLAPSED_KEY = 'ainovel.cms.siderCollapsed';
+
+function siderCollapsed(): boolean {
+  return localStorage.getItem(SIDER_COLLAPSED_KEY) === '1';
+}
+
 function shell(content: string): string {
-  const allTabs: Array<[Page, string]> = [
-    ['dashboard', 'Dashboard'],
-    ['offers', 'Offers'],
-    ['tapjoy-monitor', 'Tapjoy'],
-    ['pubscale-monitor', 'PubScale'],
-    ['users', 'Users'],
-    ['referrals', 'Referrals'],
-    ['redemptions', 'Redemptions'],
-    ['novels', 'Novels'],
-    ['settings', 'Settings'],
-    ['audit', 'Audit log'],
+  const allPages: Page[] = [
+    'dashboard',
+    'novels',
+    'offers',
+    'tapjoy-monitor',
+    'pubscale-monitor',
+    'users',
+    'referrals',
+    'redemptions',
+    'settings',
+    'audit',
   ];
   const role = state.session?.role;
   // Editors manage novel content only; every other tab's endpoints would 403 for them. Novels is
   // readable by analysts (stats) and editable by superadmins.
-  const tabs =
+  const pages =
     role === 'editor'
-      ? allTabs.filter(([page]) => page === 'novels')
-      : allTabs.filter(
-          ([page]) =>
+      ? allPages.filter((page) => page === 'novels')
+      : allPages.filter(
+          (page) =>
             (!['offers', 'settings'].includes(page) || role === 'superadmin') &&
             (page !== 'referrals' || role !== 'fulfillment') &&
             (page !== 'novels' || role === 'analyst' || role === 'superadmin'),
         );
+  const groups: Array<[string, Page[]]> = [];
+  for (const page of pages) {
+    const group = PAGE_META[page].group;
+    const last = groups[groups.length - 1];
+    if (last?.[0] === group) last[1].push(page);
+    else groups.push([group, [page]]);
+  }
+  const current = PAGE_META[state.page];
+  const who = state.session?.email ?? state.session?.id ?? 'Unknown admin';
+  const collapsed = siderCollapsed();
   return `
-    <div class="app-shell">
+    <div class="app-shell ${collapsed ? 'sider-collapsed' : ''}">
       <aside class="sidebar">
-        <div>
-          <p class="eyebrow">AINovel</p>
-          <h1>Admin CMS</h1>
+        <div class="sider-logo">
+          <span class="logo-mark">AI</span>
+          <span class="logo-text">AINovel <small>CMS</small></span>
         </div>
-        <nav>
-          ${tabs
+        <nav class="sider-menu" aria-label="Main">
+          ${groups
             .map(
-              ([page, label]) =>
-                `<button class="nav-button ${state.page === page ? 'active' : ''}" data-page="${page}">${label}</button>`,
+              ([group, groupPages]) => `
+                <div class="menu-group">
+                  <p class="menu-group-title">${group}</p>
+                  ${groupPages
+                    .map(
+                      (page) =>
+                        `<button class="nav-button ${state.page === page ? 'active' : ''}" data-page="${page}" title="${PAGE_META[page].label}">${icon(PAGE_META[page].icon)}<span>${PAGE_META[page].label}</span></button>`,
+                    )
+                    .join('')}
+                </div>`,
             )
             .join('')}
         </nav>
-        <div class="session-card">
-          <strong>${state.session?.email ?? state.session?.id ?? 'Unknown admin'}</strong>
-          <span>${state.session?.role ?? ''}</span>
-          <button class="secondary" id="logoutButton">Log out</button>
-        </div>
+        <button class="sider-trigger" id="siderToggle" type="button" title="${collapsed ? 'Expand menu' : 'Collapse menu'}">${icon(collapsed ? 'unfold' : 'fold')}</button>
       </aside>
-      <main class="content">
-        ${state.error ? `<div class="alert">${escapeHtml(state.error)}</div>` : ''}
-        ${state.loading ? '<div class="loading">Loading…</div>' : ''}
-        ${content}
-      </main>
+      <div class="layout-main">
+        <header class="layout-header">
+          <nav class="breadcrumb" aria-label="Breadcrumb">
+            <span>${current.group}</span><span class="breadcrumb-sep">/</span><strong>${current.label}</strong>
+          </nav>
+          <div class="header-account">
+            <span class="avatar">${escapeHtml(who.slice(0, 1).toUpperCase())}</span>
+            <span class="account-meta"><strong>${escapeHtml(who)}</strong><span class="tag">${escapeHtml(role ?? '')}</span></span>
+            <button class="secondary header-logout" id="logoutButton" type="button">${icon('logout')}<span>Log out</span></button>
+          </div>
+        </header>
+        ${state.loading ? '<div class="top-progress" role="progressbar" aria-label="Loading"></div>' : ''}
+        <main class="content">
+          ${state.error ? `<div class="alert alert-error" role="alert">${escapeHtml(state.error)}</div>` : ''}
+          ${content}
+        </main>
+      </div>
     </div>
   `;
 }
@@ -288,19 +359,24 @@ function renderLogin(): void {
   appRoot.innerHTML = `
     <main class="login-page">
       <section class="login-card">
-        <p class="eyebrow">AINovel CMS</p>
-        <h1>Admin sign in</h1>
-        ${state.error ? `<div class="alert">${escapeHtml(state.error)}</div>` : ''}
+        <div class="login-brand">
+          <span class="logo-mark">AI</span>
+          <div>
+            <h1>AINovel CMS</h1>
+            <p class="muted">Sign in to manage novels, rewards and users.</p>
+          </div>
+        </div>
+        ${state.error ? `<div class="alert alert-error" role="alert">${escapeHtml(state.error)}</div>` : ''}
         <form id="loginForm" class="form-stack">
           <label>
             Email
-            <input name="email" type="email" autocomplete="username" required />
+            <input name="email" type="email" autocomplete="username" placeholder="you@company.com" required />
           </label>
           <label>
             Password
-            <input name="password" type="password" minlength="12" maxlength="128" autocomplete="current-password" required />
+            <input name="password" type="password" minlength="12" maxlength="128" autocomplete="current-password" placeholder="At least 12 characters" required />
           </label>
-          <button type="submit">${state.loading ? 'Signing in…' : 'Sign in'}</button>
+          <button type="submit" class="block" ${state.loading ? 'disabled' : ''}>${state.loading ? 'Signing in…' : 'Sign in'}</button>
         </form>
       </section>
     </main>
@@ -327,6 +403,10 @@ function renderLogin(): void {
 function wireShell(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-page]').forEach((button) => {
     button.addEventListener('click', () => setPage(button.dataset['page'] as Page));
+  });
+  document.querySelector<HTMLButtonElement>('#siderToggle')?.addEventListener('click', () => {
+    localStorage.setItem(SIDER_COLLAPSED_KEY, siderCollapsed() ? '0' : '1');
+    render();
   });
   document.querySelector<HTMLButtonElement>('#logoutButton')?.addEventListener('click', () => {
     void runAction(

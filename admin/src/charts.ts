@@ -11,13 +11,13 @@
 
 // Categorical slots 1 and 2. Assigned by entity: minted is always blue, burned is always orange,
 // in every chart on the page.
-export const SERIES_MINTED = '#2a78d6';
+export const SERIES_MINTED = '#1677ff';
 export const SERIES_BURNED = '#eb6834';
 
 const SURFACE = '#ffffff';
-const GRID = '#e1e6f0';
-const AXIS_INK = '#68758f';
-const VALUE_INK = '#26334d';
+const GRID = '#f0f0f0';
+const AXIS_INK = 'rgba(0, 0, 0, 0.45)';
+const VALUE_INK = 'rgba(0, 0, 0, 0.88)';
 
 const VIEW_W = 720;
 
