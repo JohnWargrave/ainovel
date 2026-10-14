@@ -877,7 +877,7 @@ Quy ước chung cho mọi endpoint trong mục 4:
   - Thực tế tài khoản bị suspend/ban nhận `401 SESSION_REVOKED` từ bước kiểm tra token trước; các mã `403 ACCOUNT_BLOCKED` / `UNLOCK_BLOCKED` / `EARNING_BLOCKED` / `EARNING_SUSPENDED` chỉ là phòng hờ.
   - `429 RATE_LIMITED` — vượt rate limit của route (chỉ những route có ghi rate limit).
 - **Hiển thị theo vùng (region/visibility):** user chỉ thấy truyện có `status = published` **và** (`regions` rỗng = mọi nơi, **hoặc** `regions` chứa `country_code` hoặc `region_id` của user). Chương chỉ hiển thị khi `status = published` và `publish_at` đã tới (hoặc null). Truyện/chương không được cấp phép cho vùng của user, chưa xuất bản hoặc không tồn tại đều trả **cùng một** lỗi 404 (`NOVEL_NOT_FOUND` / `CHAPTER_NOT_FOUND`) — server cố ý không phân biệt.
-- **`cover_url`:** chuỗi URL tuyệt đối dùng thẳng được (ảnh upload qua CMS được lưu trên object storage SeaweedFS/S3 với dạng `<public_base_url>/<key>`; admin cũng có thể nhập một URL ngoài). `null` khi truyện chưa có ảnh bìa → app hiển thị ảnh placeholder.
+- **`cover_url`:** chuỗi URL tuyệt đối dùng thẳng được (ảnh upload qua CMS được lưu trên object storage Cloudflare R2 (S3-compatible) với dạng `<public_base_url>/<key>`; admin cũng có thể nhập một URL ngoài). `null` khi truyện chưa có ảnh bìa → app hiển thị ảnh placeholder.
 - **Cấu hình thưởng đọc** theo region (`reading_wpm`, `min_read_ratio`, `chapter_reward_coin`, `chapter_reward_daily_cap`, `completion_scroll_ratio`...) được trả trong `GET /config` → `features.novel`.
 
 ### Object dùng chung: `NovelSummary`

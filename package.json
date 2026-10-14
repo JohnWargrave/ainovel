@@ -16,6 +16,7 @@
     "admin:typecheck": "tsc -p admin/tsconfig.json --noEmit",
     "admin:build": "tsc -p admin/tsconfig.json --noEmit && vite build --config admin/vite.config.ts",
     "admin:set-password": "node dist/cli/set-admin-password.js",
+    "storage:migrate": "node dist/cli/migrate-object-storage.js",
     "start": "node dist/server.js",
     "start:worker": "node dist/worker.js",
     "migrate": "node-pg-migrate --envPath .env --migrations-dir src/db/migrations",
