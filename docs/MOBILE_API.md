@@ -1334,7 +1334,7 @@ Quy ước chung:
 | `placement`      | Mục đích                   | Phần thưởng                                                             |
 | ---------------- | -------------------------- | ----------------------------------------------------------------------- |
 | `earncoin`       | Xem ad nhận coin           | Coin được cộng server-side khi SSV về                                   |
-| `checkin`        | Ad ở màn điểm danh         | Coin được cộng server-side khi SSV về                                   |
+| `checkin`        | Ad x2 điểm danh            | SSV **không** cộng coin; intent được dùng ở `POST /checkin/double`      |
 | `luckyspin`      | Ad để được quay vòng quay  | Intent được dùng ở API spin (`intent_id`) — ngoài phạm vi mục này       |
 | `chapter_unlock` | Ad mở khoá chương VIP      | Intent được dùng ở `POST /novels/chapters/:id/unlock` với `method="ad"` |
 | _(bỏ trống)_     | Build cũ chưa có placement | Dùng quota chung của region, cộng coin khi SSV về                       |
@@ -1594,6 +1594,7 @@ Các `entry_type` client có thể gặp (kèm `entry_label`):
 | `DIRECT_CREDIT`          | Coin reward            | +   | `POST /earning/coin`                                                                  |
 | `NOVEL_READ_CREDIT`      | Chapter reading reward | +   |                                                                                       |
 | `CHAPTER_UNLOCK_DEBIT`   | Chapter unlock         | −   |                                                                                       |
+| `CHECKIN_BONUS_CREDIT`   | Check-in bonus         | +   | `POST /checkin/double`                                                                |
 
 Lỗi:
 
@@ -1605,7 +1606,7 @@ Lỗi:
 
 Ngày được tính theo timezone của **region của user** (`users.region_id`, không phụ thuộc IP hay VPN). Reset vào 00:00 giờ địa phương của region (`reset_at`, biểu diễn bằng UTC). Bảng thưởng `rewards[]` đánh số theo ngày 1..N và lặp lại sau ngày cuối. Bỏ lỡ một ngày thì streak quay về ngày 1.
 
-> Không có cơ chế "x2 bằng quảng cáo" trong các endpoint check-in. `POST /checkin/claim` không nhận `intent_id`. Placement rewarded-ad `checkin` (tạo qua `POST /earning/rewarded-ad/intent`, xem mục Rewarded Ads) được trả coin **riêng** bởi AdMob SSV callback, ghi thành `REWARDED_AD_CREDIT`, và không liên kết với lần claim check-in.
+> **x2 bằng quảng cáo:** sau khi claim, app có thể cho xem rewarded ad placement `checkin` rồi gọi `POST /checkin/double` để nhận thêm đúng bằng thưởng điểm danh hôm nay. SSV callback của placement `checkin` không tự cộng coin.
 
 ### `GET /checkin/state`
 
@@ -1623,7 +1624,9 @@ Response `200`:
   "today_claimed": false,
   "rewards": [10, 15, 20, 25, 30, 40, 100],
   "next_reward_coin": 20,
-  "reset_at": "2026-10-14T17:00:00.000Z"
+  "reset_at": "2026-10-14T17:00:00.000Z",
+  "bonus_coin": 20,
+  "bonus_claimed_today": false
 }
 ```
 
@@ -1632,6 +1635,7 @@ Response `200`:
 - `days_claimed`: số ngày liên tiếp đã được cộng, không quay vòng. Account mới bằng 0.
 - `next_reward_coin`: số coin của lần claim kế tiếp. Nếu hôm nay chưa claim thì đây là phần thưởng hôm nay, nếu đã claim thì là phần thưởng ngày mai (giả định streak không đứt).
 - `rewards[]`, `next_reward_coin`: kiểu number.
+- `bonus_coin`: số coin `POST /checkin/double` sẽ cộng (= thưởng điểm danh của hôm nay). `bonus_claimed_today`: hôm nay đã nhận x2 chưa. Hiện nút "Watch a video to double it" khi `today_claimed && !bonus_claimed_today`.
 
 Lỗi:
 
@@ -1667,6 +1671,40 @@ Lỗi:
 - `409 ALREADY_CLAIMED`: hôm nay đã claim, kể cả khi hai request song song tới cùng lúc.
 - `429 RATE_LIMITED`: vượt 10 lần/phút.
 - `429 UNBACKED_CAP_EXCEEDED` / `429 MINT_PAUSED`.
+
+### `POST /checkin/double`
+
+Nhận thưởng x2 điểm danh sau khi xem rewarded ad. Coin vào `available`, ghi thành `CHECKIN_BONUS_CREDIT`. **Auth:** Bearer. **Headers:** App headers. **Rate limit:** 10 request/60s/user.
+
+Luồng:
+
+1. `POST /checkin/claim` thành công (hoặc `today_claimed = true`).
+2. `POST /earning/rewarded-ad/intent { "placement": "checkin" }` → `intent_id`, `ssv_custom_data`.
+3. Show AdMob rewarded ad với `customData = ssv_custom_data`. Chờ `onUserEarnedReward`.
+4. `POST /checkin/double { "intent_id": "…" }`. Nếu `403 AD_NOT_VERIFIED` thì SSV chưa về: retry với backoff (1s, 2s, 4s…, tối đa ~30–60s).
+
+Body:
+
+```json
+{ "intent_id": "0192f7c3-1111-7222-8333-444455556666" }
+```
+
+Response `200`:
+
+```json
+{ "credited_coin": 20, "new_balance": "12540" }
+```
+
+Lỗi:
+
+- `400 VALIDATION_ERROR`: `intent_id` không phải UUID.
+- `401` lỗi auth.
+- `403 AD_NOT_VERIFIED`: intent không tồn tại, không thuộc user, chưa được SSV xác nhận (nên retry), sai placement (không phải `checkin`), hoặc đã dùng.
+- `403 EARNING_BLOCKED` / `403 EARNING_SUSPENDED`.
+- `404 FEATURE_DISABLED`: region tắt check-in.
+- `409 CHECKIN_NOT_CLAIMED`: hôm nay chưa claim điểm danh.
+- `409 ALREADY_CLAIMED`: hôm nay đã nhận x2 (intent không bị tiêu).
+- `429 RATE_LIMITED` / `429 MINT_PAUSED`.
 
 ## 8. Nhiệm vụ
 
@@ -1870,7 +1908,6 @@ Lỗi:
 4. Gọi `POST /spin` với `intent_id`. Mỗi intent chỉ dùng được **1 lần**.
 
 Lượt free: gọi thẳng `POST /spin/free` (không body).
-
 
 Nếu app gọi `/spin` trước khi SSV kịp tới, server trả `403 AD_NOT_VERIFIED`. Đây là lỗi tạm thời: **retry sau vài giây** với cùng `intent_id`. Ngày reset theo timezone của config spin trong region.
 

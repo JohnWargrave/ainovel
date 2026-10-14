@@ -35,7 +35,8 @@ export type LedgerEntryType =
   | 'LOGIN_BIND_CREDIT'
   | 'DIRECT_CREDIT'
   | 'NOVEL_READ_CREDIT'
-  | 'CHAPTER_UNLOCK_DEBIT';
+  | 'CHAPTER_UNLOCK_DEBIT'
+  | 'CHECKIN_BONUS_CREDIT';
 
 export type RedemptionStatus =
   'REQUESTED' | 'FRAUD_REVIEW' | 'APPROVED' | 'PURCHASING' | 'DELIVERED' | 'REJECTED' | 'FAILED';
@@ -302,6 +303,7 @@ interface RewardedAdIntentsTable {
   placement: string | null;
   spin_history_id: string | null;
   chapter_unlock_id: ColumnType<string | null, string | null | undefined, string | null>;
+  checkin_bonus_ledger_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 interface CatalogItemsTable {

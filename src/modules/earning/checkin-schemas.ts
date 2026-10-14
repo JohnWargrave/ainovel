@@ -21,5 +21,20 @@ export const CheckinStateResponseSchema = Type.Object({
   next_reward_coin: Type.Number(),
   // Midnight in the region's timezone, expressed in UTC.
   reset_at: Type.String(),
+  // "Watch a video to double it": the bonus POST /checkin/double would pay (today's reward), and
+  // whether it has already been taken today.
+  bonus_coin: Type.Number(),
+  bonus_claimed_today: Type.Boolean(),
 });
 export type CheckinStateResponse = Static<typeof CheckinStateResponseSchema>;
+
+export const CheckinDoubleBodySchema = Type.Object({
+  intent_id: Type.String({ format: 'uuid' }),
+});
+export type CheckinDoubleBody = Static<typeof CheckinDoubleBodySchema>;
+
+export const CheckinDoubleResponseSchema = Type.Object({
+  credited_coin: Type.Number(),
+  new_balance: Type.String(),
+});
+export type CheckinDoubleResponse = Static<typeof CheckinDoubleResponseSchema>;

@@ -553,7 +553,11 @@ describe('lucky spin', () => {
     const first = await spin(app, tokenFor(userId), await verifiedIntent(userId, { regionId }));
     expect(first.statusCode).toBe(200);
     const firstBody = first.json<SpinResponseBody>();
-    expect(firstBody).toMatchObject({ prize_type: 'boost', prize_value: '2x60', new_balance: '100' });
+    expect(firstBody).toMatchObject({
+      prize_type: 'boost',
+      prize_value: '2x60',
+      new_balance: '100',
+    });
     const firstEnd = Date.parse(firstBody.boost?.expires_at ?? '');
     expect(firstEnd - Date.now()).toBeGreaterThan(59 * 60_000);
     expect(firstEnd - Date.now()).toBeLessThanOrEqual(60 * 60_000);

@@ -221,6 +221,101 @@ describe('daily earning (check-in + tasks)', () => {
     expect(stateBody.next_reward_coin).toBe(stateBody.rewards[1]);
   });
 
+  describe('check-in ad bonus', () => {
+    async function checkinIntent(
+      userId: string,
+      overrides?: { status?: string; placement?: string },
+    ): Promise<string> {
+      const id = uuidv7();
+      await db
+        .insertInto('rewarded_ad_intents')
+        .values({
+          id,
+          user_id: userId,
+          region_id: 'VN',
+          status: overrides?.status ?? 'consumed',
+          placement: overrides?.placement ?? 'checkin',
+          expires_at: new Date(Date.now() + 10 * 60 * 1000),
+        })
+        .execute();
+      return id;
+    }
+
+    async function double(
+      userId: string,
+      intentId: string,
+    ): Promise<ReturnType<FastifyInstance['inject']>> {
+      return app.inject({
+        method: 'POST',
+        url: '/checkin/double',
+        headers: auth(userId),
+        payload: { intent_id: intentId },
+      });
+    }
+
+    it('needs today claimed first', async () => {
+      const userId = await createUser(await enabledRegion());
+      const res = await double(userId, await checkinIntent(userId));
+      expect(res.statusCode).toBe(409);
+      expect(res.json<ErrorResponseBody>().error.code).toBe('CHECKIN_NOT_CLAIMED');
+    });
+
+    it("pays today's reward again for a verified checkin ad, once per day", async () => {
+      const userId = await createUser(await enabledRegion());
+      await seedCheckin(userId, 1);
+      await app.inject({ method: 'POST', url: '/checkin/claim', headers: auth(userId) });
+
+      const before = await app.inject({
+        method: 'GET',
+        url: '/checkin/state',
+        headers: auth(userId),
+      });
+      expect(before.json()).toMatchObject({
+        streak_day: 2,
+        bonus_coin: 15,
+        bonus_claimed_today: false,
+      });
+
+      const intentId = await checkinIntent(userId);
+      const res = await double(userId, intentId);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ credited_coin: 15, new_balance: '30' });
+
+      const intent = await db
+        .selectFrom('rewarded_ad_intents')
+        .select('checkin_bonus_ledger_id')
+        .where('id', '=', intentId)
+        .executeTakeFirstOrThrow();
+      expect(intent.checkin_bonus_ledger_id).not.toBeNull();
+
+      const replay = await double(userId, intentId);
+      expect(replay.statusCode).toBe(403);
+      expect(replay.json<ErrorResponseBody>().error.code).toBe('AD_NOT_VERIFIED');
+
+      const second = await double(userId, await checkinIntent(userId));
+      expect(second.statusCode).toBe(409);
+      expect(second.json<ErrorResponseBody>().error.code).toBe('ALREADY_CLAIMED');
+
+      const after = await app.inject({
+        method: 'GET',
+        url: '/checkin/state',
+        headers: auth(userId),
+      });
+      expect(after.json()).toMatchObject({ bonus_claimed_today: true });
+    });
+
+    it('rejects an unverified or wrong-placement intent', async () => {
+      const userId = await createUser(await enabledRegion());
+      await app.inject({ method: 'POST', url: '/checkin/claim', headers: auth(userId) });
+
+      const pending = await double(userId, await checkinIntent(userId, { status: 'pending' }));
+      expect(pending.statusCode).toBe(403);
+      const spinAd = await double(userId, await checkinIntent(userId, { placement: 'luckyspin' }));
+      expect(spinAd.statusCode).toBe(403);
+      expect(spinAd.json<ErrorResponseBody>().error.code).toBe('AD_NOT_VERIFIED');
+    });
+  });
+
   it('treats one Vietnam calendar day as one day even across a UTC date change', async () => {
     const userId = await createUser(await enabledRegion({ timezone: 'Asia/Ho_Chi_Minh' }));
     // Only Date is faked: pg/ioredis timers keep running on the real clock.

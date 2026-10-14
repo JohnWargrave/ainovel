@@ -201,7 +201,8 @@ export async function recordReadHeartbeat(
       refId: chapter.id,
       // Keyed on the chapter, so even a duplicate progress row could never pay twice.
       idempotencyKey: `novel-read:${userId}:${chapter.id}`,
-      note: multiplier > 1 ? `Chapter reading reward ×${String(multiplier)}` : 'Chapter reading reward',
+      note:
+        multiplier > 1 ? `Chapter reading reward ×${String(multiplier)}` : 'Chapter reading reward',
     });
     await trx
       .updateTable('novel_read_progress')
