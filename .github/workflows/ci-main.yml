@@ -135,7 +135,7 @@ jobs:
               echo "Missing $PROD_ENV_FILE on deploy host. Create it with production values before deploying."
               exit 1
             fi
-            docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml up -d postgres redis seaweedfs
+            docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml up -d postgres redis
             docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml build migrate backend-api backend-worker
             docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml run --rm -T migrate </dev/null
             docker compose --env-file '$PROD_ENV_FILE' -f docker-compose.prod.yml up -d --force-recreate --remove-orphans backend-api backend-worker

@@ -8,52 +8,13 @@ import {
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
 
-// S3-compatible object storage (AWS S3, Cloudflare R2, SeaweedFS) for covers and raw import files.
+// S3-compatible object storage for covers and raw import files: Cloudflare R2 in production,
+// SeaweedFS from docker-compose.yml in development.
 export interface ObjectStorage {
   put(key: string, body: Buffer, contentType: string): Promise<void>;
   get(key: string): Promise<Buffer>;
   delete(key: string): Promise<void>;
   publicUrl(key: string): string;
-}
-
-export interface S3ConnectionConfig {
-  endpoint: string | undefined;
-  region: string | undefined;
-  forcePathStyle: boolean;
-  accessKeyId: string | undefined;
-  secretAccessKey: string | undefined;
-}
-
-export function createS3Client(config: S3ConnectionConfig): S3Client {
-  return new S3Client({
-    region: config.region ?? 'auto',
-    ...(config.endpoint ? { endpoint: config.endpoint } : {}),
-    forcePathStyle: config.forcePathStyle,
-    ...(config.accessKeyId && config.secretAccessKey
-      ? {
-          credentials: {
-            accessKeyId: config.accessKeyId,
-            secretAccessKey: config.secretAccessKey,
-          },
-        }
-      : {}),
-    // SDK 3.729+ adds a CRC32 checksum to every put (sent as an aws-chunked trailer) and asks for
-    // one on every get. Cloudflare R2 rejects the chunked-signed trailer, and AWS documents
-    // WHEN_REQUIRED as the opt-out for S3-compatible stores; checksums still go out where an
-    // operation needs one.
-    requestChecksumCalculation: 'WHEN_REQUIRED',
-    responseChecksumValidation: 'WHEN_REQUIRED',
-  });
-}
-
-export function s3ConfigFromEnv(): S3ConnectionConfig {
-  return {
-    endpoint: env.S3_ENDPOINT,
-    region: env.S3_REGION,
-    forcePathStyle: env.S3_FORCE_PATH_STYLE,
-    accessKeyId: env.S3_ACCESS_KEY_ID,
-    secretAccessKey: env.S3_SECRET_ACCESS_KEY,
-  };
 }
 
 class S3ObjectStorage implements ObjectStorage {
@@ -63,7 +24,25 @@ class S3ObjectStorage implements ObjectStorage {
     private readonly bucket: string,
     private readonly publicBaseUrl: string,
   ) {
-    this.client = createS3Client(s3ConfigFromEnv());
+    this.client = new S3Client({
+      region: env.S3_REGION ?? 'auto',
+      ...(env.S3_ENDPOINT ? { endpoint: env.S3_ENDPOINT } : {}),
+      forcePathStyle: env.S3_FORCE_PATH_STYLE,
+      ...(env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY
+        ? {
+            credentials: {
+              accessKeyId: env.S3_ACCESS_KEY_ID,
+              secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+            },
+          }
+        : {}),
+      // SDK 3.729+ adds a CRC32 checksum to every put (sent as an aws-chunked trailer) and asks for
+      // one on every get. Cloudflare R2 rejects the chunked-signed trailer, and AWS documents
+      // WHEN_REQUIRED as the opt-out for S3-compatible stores; checksums still go out where an
+      // operation needs one.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
+    });
   }
 
   async put(key: string, body: Buffer, contentType: string): Promise<void> {

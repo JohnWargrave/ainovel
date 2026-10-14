@@ -47,31 +47,6 @@ services:
       timeout: 5s
       retries: 20
 
-  # S3-compatible storage for novel covers and import files. The S3 API (8333) needs the S3_* keys;
-  # the filer (8888) serves stored files over plain HTTP and is what S3_PUBLIC_BASE_URL points at.
-  # 1GB volumes with a fixed cap: the 30GB default leaves a small disk only ~2 volume slots, all
-  # taken at boot, and every bucket write then fails with "no free volumes left".
-  seaweedfs:
-    image: chrislusf/seaweedfs:4.48
-    restart: unless-stopped
-    # Signs with SEAWEEDFS_ACCESS_KEY_ID / SEAWEEDFS_SECRET_ACCESS_KEY, falling back to the API's
-    # S3_* keys. Set the SEAWEEDFS_* pair to the old keys before pointing S3_* at Cloudflare R2, or
-    # this store would come back up with the R2 keys and the move off it could no longer read it.
-    env_file:
-      - .env.production
-    entrypoint: ['/bin/sh', '-c']
-    command:
-      - |
-        cat > /tmp/s3.json <<JSON
-        {"identities":[{"name":"ainovel","credentials":[{"accessKey":"$${SEAWEEDFS_ACCESS_KEY_ID:-$${S3_ACCESS_KEY_ID}}","secretKey":"$${SEAWEEDFS_SECRET_ACCESS_KEY:-$${S3_SECRET_ACCESS_KEY}}"}],"actions":["Admin","Read","Write","List","Tagging"]}]}
-        JSON
-        exec weed server -dir=/data -ip=seaweedfs -ip.bind=0.0.0.0 -s3 -s3.config=/tmp/s3.json -master.volumeSizeLimitMB=1024 -volume.max=50
-    ports:
-      # Filer only, loopback only: host nginx serves /media/covers/ from it. The S3 API stays internal.
-      - '127.0.0.1:${FILER_PORT:-8888}:8888'
-    volumes:
-      - seaweeddata_prod:/data
-
   migrate:
     <<: *backend-env
     restart: 'no'
@@ -131,4 +106,3 @@ services:
 volumes:
   pgdata_prod:
   redisdata_prod:
-  seaweeddata_prod:
