@@ -4,19 +4,29 @@ import { uuidv7 } from 'uuidv7';
 import { db } from '../../db/index.js';
 import { AppError } from '../../lib/errors.js';
 import { createAdminCsrfGuard, createAdminGuard } from '../../plugins/admin-guard.js';
-import { getCoinRewardSettings, MAX_COIN_REWARD } from './coin-reward-settings.service.js';
+import { invalidateConfigCache } from './config.service.js';
+import {
+  getCoinRewardSettings,
+  MAX_COIN_REWARD,
+  type CoinRewardSettings,
+} from './coin-reward-settings.service.js';
 
 const SUPERADMIN_ROLES = ['superadmin'] as const;
+
+const WelcomeModeSchema = Type.Union([Type.Literal('instant'), Type.Literal('link_required')]);
 
 const CoinRewardSettingsSchema = Type.Object({
   welcome_coin: Type.Integer({ minimum: 0, maximum: MAX_COIN_REWARD }),
   google_login: Type.Integer({ minimum: 0, maximum: MAX_COIN_REWARD }),
+  welcome_mode: WelcomeModeSchema,
   updated_at: Type.String(),
 });
 
 const UpdateCoinRewardSettingsBodySchema = Type.Object({
   welcome_coin: Type.Integer({ minimum: 0, maximum: MAX_COIN_REWARD }),
   google_login: Type.Integer({ minimum: 0, maximum: MAX_COIN_REWARD }),
+  // Optional so a CMS build that predates the field keeps saving without resetting it.
+  welcome_mode: Type.Optional(WelcomeModeSchema),
 });
 type UpdateCoinRewardSettingsBody = Static<typeof UpdateCoinRewardSettingsBodySchema>;
 
@@ -25,14 +35,11 @@ function requireAdmin(request: { adminUser?: { id: string } }): { id: string } {
   return request.adminUser;
 }
 
-function serialize(settings: {
-  welcome_coin: number;
-  google_login: number;
-  updated_at: Date;
-}): Static<typeof CoinRewardSettingsSchema> {
+function serialize(settings: CoinRewardSettings): Static<typeof CoinRewardSettingsSchema> {
   return {
     welcome_coin: settings.welcome_coin,
     google_login: settings.google_login,
+    welcome_mode: settings.welcome_mode,
     updated_at: settings.updated_at.toISOString(),
   };
 }
@@ -87,10 +94,12 @@ export function registerCoinRewardSettingsAdminRoutes(app: FastifyInstance): voi
               before: {
                 welcome_coin: before.welcome_coin,
                 google_login: before.google_login,
+                welcome_mode: before.welcome_mode,
               },
               after: {
                 welcome_coin: after.welcome_coin,
                 google_login: after.google_login,
+                welcome_mode: after.welcome_mode,
               },
             }),
             ip: request.ip,
@@ -98,6 +107,9 @@ export function registerCoinRewardSettingsAdminRoutes(app: FastifyInstance): voi
           .execute();
         return after;
       });
+      // /config carries the welcome bonus; drop the region caches so the app sees the change on its
+      // next fetch instead of up to a minute later.
+      await invalidateConfigCache();
 
       reply.code(200).send(serialize(updated));
     },

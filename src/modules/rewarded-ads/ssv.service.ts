@@ -122,7 +122,13 @@ export async function processAdmobSsv(input: SsvInput, deps: SsvDeps): Promise<v
     const feature = await getRewardedAdsFeature(intentSnapshot.region_id);
     const placement = asPlacement(intentSnapshot.placement);
     const limits = getPlacementFeature(feature, placement);
-    const coin = computeCoin(feature.est_ecpm_usd, feature.coin_cap, limits.coin_multiplier);
+    // A checkin ad pays out through POST /checkin/double (today's reward, doubled), never here —
+    // paying eCPM coin as well would reward the one ad twice. Forced in code rather than left to the
+    // region's coin_multiplier so a misconfigured region cannot double-pay.
+    const coin =
+      placement === 'checkin'
+        ? 0
+        : computeCoin(feature.est_ecpm_usd, feature.coin_cap, limits.coin_multiplier);
     const payoutUsdEstimate = feature.est_ecpm_usd / 1000;
 
     const outcome = await db.transaction().execute(async (trx) => {

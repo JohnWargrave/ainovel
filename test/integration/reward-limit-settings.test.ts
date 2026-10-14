@@ -36,6 +36,10 @@ interface SpinConfigAdmin {
   daily_cap: number;
   is_active: boolean;
   used_by: { region_id: string; role: 'paid' | 'free' }[];
+  prizes: { slot: number; type: string; value: number | string; weight: number; label: string }[];
+  ev_coin: number;
+  ev_min: number | null;
+  ev_max: number;
   updated_at: string;
 }
 
@@ -44,6 +48,7 @@ interface SpinStateBody {
   spins_today: number;
   spins_remaining: number;
   free_spin_available: boolean;
+  prizes_display: { label: string }[];
 }
 
 async function createAdminUser(role: string): Promise<string> {
@@ -404,6 +409,121 @@ describe('reward limit settings admin API', () => {
       expect(state.spins_remaining).toBe(4);
       // The free spin is a separate lane and must not be taxed by the paid cap.
       expect(state.free_spin_available).toBe(true);
+    });
+
+    it('replaces the prize table, keeps the cap and serves the new wheel', async () => {
+      const paidId = await createSpinConfig(20);
+      const freeId = await createSpinConfig(1, 40);
+      const regionId = `SP_${randomUUID().slice(0, 8)}`;
+      await db
+        .insertInto('region_config')
+        .values({
+          region_id: regionId,
+          countries: [],
+          features: {
+            timezone: 'UTC',
+            spin: { enabled: true, table_id: paidId, free_table_id: freeId },
+          },
+        })
+        .execute();
+      const userId = await createSpinUser(regionId);
+
+      const put = await app.inject({
+        method: 'PUT',
+        url: `/admin/spin/configs/${paidId}`,
+        headers: adminHeaders(superadminId),
+        payload: {
+          prizes: [
+            { slot: 1, type: 'coin', value: 40, weight: 3, tier: 'low' },
+            { slot: 2, type: 'boost', value: '2x60', weight: 1, tier: 'mid' },
+          ],
+        },
+      });
+      expect(put.statusCode).toBe(200);
+      const saved = put.json<SpinConfigAdmin>();
+      expect(saved).toMatchObject({ daily_cap: 20, ev_coin: 30, ev_min: null, ev_max: 50 });
+      expect(saved.prizes).toEqual([
+        { slot: 1, type: 'coin', value: 40, weight: 3, tier: 'low', label: '40 coin' },
+        { slot: 2, type: 'boost', value: '2x60', weight: 1, tier: 'mid', label: '×2 boost' },
+      ]);
+
+      const state = await spinState(userId);
+      expect(state.prizes_display.map((prize) => prize.label)).toEqual(['40 coin', '×2 boost']);
+
+      const audit = await db
+        .selectFrom('audit_log')
+        .select('detail')
+        .where('action', '=', 'SPIN_CONFIG_UPDATED')
+        .where('target_id', '=', paidId)
+        .executeTakeFirstOrThrow();
+      expect(audit.detail).toMatchObject({ after: { daily_cap: 20, prizes: saved.prizes } });
+    });
+
+    it('rejects a prize table the spin would refuse, naming the problem', async () => {
+      const paidId = await createSpinConfig(20);
+      const freeId = await createSpinConfig(1, 40);
+      await db
+        .insertInto('region_config')
+        .values({
+          region_id: `SR_${randomUUID().slice(0, 8)}`,
+          countries: [],
+          features: {
+            timezone: 'UTC',
+            spin: { enabled: true, table_id: paidId, free_table_id: freeId },
+          },
+        })
+        .execute();
+      const put = async (
+        configId: string,
+        prizes: unknown[],
+      ): Promise<ReturnType<FastifyInstance['inject']>> =>
+        app.inject({
+          method: 'PUT',
+          url: `/admin/spin/configs/${configId}`,
+          headers: adminHeaders(superadminId),
+          payload: { prizes },
+        });
+      const coin = (slot: number, value: number): Record<string, unknown> => ({
+        slot,
+        type: 'coin',
+        value,
+        weight: 1,
+        tier: 'low',
+      });
+
+      const cases: [string, unknown[], string][] = [
+        [freeId, [coin(1, 100)], 'between 30 and 50'],
+        [paidId, [coin(1, 60)], 'above'],
+        [paidId, [coin(1, 10), coin(1, 20)], 'Slot 1 is used twice'],
+        [paidId, [{ ...coin(1, 10), type: 'boost', value: '2x' }], '2x60'],
+        [paidId, [{ ...coin(1, 10), value: '10' }], 'whole'],
+        [freeId, [{ ...coin(1, 40), tier: 'jackpot' }], 'jackpot'],
+      ];
+      for (const [configId, prizes, message] of cases) {
+        const res = await put(configId, prizes);
+        expect(res.statusCode, message).toBe(400);
+        const error = res.json<{ error: { code: string; message: string } }>().error;
+        expect(error.code).toBe('SPIN_PRIZES_INVALID');
+        expect(error.message).toContain(message);
+      }
+
+      // Vouchers cannot be awarded yet, so the CMS cannot add one.
+      const voucher = await put(paidId, [{ ...coin(1, 10), type: 'voucher', value: 'GIFT' }]);
+      expect(voucher.json<ErrorResponseBody>().error.code).toBe('VALIDATION_ERROR');
+      const empty = await app.inject({
+        method: 'PUT',
+        url: `/admin/spin/configs/${paidId}`,
+        headers: adminHeaders(superadminId),
+        payload: {},
+      });
+      expect(empty.statusCode).toBe(400);
+
+      const stored = await db
+        .selectFrom('spin_config')
+        .select('prizes')
+        .where('id', '=', freeId)
+        .executeTakeFirstOrThrow();
+      expect(stored.prizes).toEqual([{ slot: 1, type: 'coin', value: 40, weight: 1, tier: 'low' }]);
     });
 
     it('requires superadmin, CSRF, a known table, and a positive bounded cap', async () => {

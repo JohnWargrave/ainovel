@@ -14,6 +14,8 @@ type GeneratedTimestamp = ColumnType<Date, Date | string | undefined, Date | str
 type GeneratedNumeric = ColumnType<string, string | number | undefined, string | number>;
 type GeneratedBigint = ColumnType<string, string | number | undefined, string | number>;
 
+export type WelcomeMode = 'instant' | 'link_required';
+
 export type LedgerEntryType =
   | 'OFFERWALL_CREDIT'
   | 'OFFERWALL_CLAWBACK'
@@ -35,7 +37,8 @@ export type LedgerEntryType =
   | 'LOGIN_BIND_CREDIT'
   | 'DIRECT_CREDIT'
   | 'NOVEL_READ_CREDIT'
-  | 'CHAPTER_UNLOCK_DEBIT';
+  | 'CHAPTER_UNLOCK_DEBIT'
+  | 'CHECKIN_BONUS_CREDIT';
 
 export type RedemptionStatus =
   'REQUESTED' | 'FRAUD_REVIEW' | 'APPROVED' | 'PURCHASING' | 'DELIVERED' | 'REJECTED' | 'FAILED';
@@ -51,6 +54,7 @@ interface CoinRewardSettingsTable {
   id: string;
   welcome_coin: Generated<number>;
   google_login: Generated<number>;
+  welcome_mode: ColumnType<WelcomeMode, WelcomeMode | undefined, WelcomeMode>;
   updated_at: GeneratedTimestamp;
 }
 
@@ -91,6 +95,7 @@ interface OfferwallOffersTable {
   description: Generated<string>;
   icon_url: string | null;
   badge_text: string | null;
+  reward_text: string | null;
   placement: string | null;
   region_ids: Generated<string[]>;
   sort_order: Generated<number>;
@@ -142,6 +147,8 @@ interface UsersTable {
   referred_by_set_at: Timestamp | null;
   referred_ip: string | null;
   referral_qualified_at: Timestamp | null;
+  // BIGINT from users_public_id_seq; display-only numeric ID.
+  public_id: Generated<string>;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
 }
@@ -302,7 +309,12 @@ interface RewardedAdIntentsTable {
   placement: string | null;
   spin_history_id: string | null;
   chapter_unlock_id: ColumnType<string | null, string | null | undefined, string | null>;
+  checkin_bonus_ledger_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
+
+// What the app collects before redeeming an item: nothing (a code is delivered) or the PayPal
+// address the reward is sent to.
+export type RecipientType = 'none' | 'paypal_email';
 
 interface CatalogItemsTable {
   id: string;
@@ -318,6 +330,7 @@ interface CatalogItemsTable {
   is_active: Generated<boolean>;
   stock_note: string | null;
   source: Generated<string>;
+  recipient_type: Generated<RecipientType>;
   updated_at: GeneratedTimestamp;
 }
 
@@ -353,6 +366,7 @@ interface RedemptionsTable {
   delivery_note: string | null;
   delivered_at: Timestamp | null;
   claimed_at: Timestamp | null;
+  recipient_email: string | null;
   claimable_at: GeneratedTimestamp;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
@@ -366,6 +380,39 @@ interface RedemptionStatusHistoryTable {
   actor: string;
   note: string | null;
   created_at: GeneratedTimestamp;
+}
+
+export type ReportTargetType = 'novel' | 'chapter' | 'app';
+export type ReportReason = 'inappropriate' | 'copyright' | 'wrong_content' | 'spam' | 'other';
+export type ReportStatus = 'open' | 'resolved' | 'dismissed';
+
+interface ContentReportsTable {
+  id: string;
+  user_id: string;
+  target_type: ReportTargetType;
+  target_id: string | null;
+  reason: ReportReason;
+  message: string | null;
+  status: Generated<ReportStatus>;
+  resolved_by: string | null;
+  resolved_at: Timestamp | null;
+  created_at: GeneratedTimestamp;
+}
+
+interface AppFeedbackTable {
+  id: string;
+  user_id: string;
+  rating: number;
+  message: string | null;
+  email: string | null;
+  app_version: string | null;
+  created_at: GeneratedTimestamp;
+}
+
+interface UserPreferencesTable {
+  user_id: string;
+  category_ids: Generated<string[]>;
+  updated_at: GeneratedTimestamp;
 }
 
 interface NovelCategoriesTable {
@@ -404,6 +451,10 @@ interface NovelsTable {
   chapter_count: Generated<number>;
   word_count: GeneratedBigint;
   search_text: Generated<string>;
+  rating: Numeric | null;
+  read_count: GeneratedBigint;
+  ai_generated: Generated<boolean>;
+  editor_reviewed: Generated<boolean>;
   published_at: Timestamp | null;
   created_by: string | null;
   created_at: GeneratedTimestamp;
@@ -462,6 +513,28 @@ interface NovelReadProgressTable {
   rewarded_at: Timestamp | null;
   completed_at: Timestamp | null;
   created_at: GeneratedTimestamp;
+}
+
+// Time-boxed reward multipliers (lucky-spin "×2 boost") — see migration 1700000000068.
+interface UserBoostsTable {
+  id: string;
+  user_id: string;
+  multiplier: number;
+  starts_at: Timestamp;
+  expires_at: Timestamp;
+  source: string;
+  source_id: string | null;
+  created_at: GeneratedTimestamp;
+}
+
+// Region-local daily reading totals for the progress tasks — see migration 1700000000071.
+interface NovelReadDailyTable {
+  user_id: string;
+  // Written and compared as the YYYY-MM-DD region-local day key; node-pg reads a DATE back as a Date.
+  day: ColumnType<Date | string, string, string>;
+  read_seconds: Generated<number>;
+  chapters_completed: Generated<number>;
+  updated_at: GeneratedTimestamp;
 }
 
 interface NovelLibraryTable {
@@ -584,6 +657,9 @@ export interface DB {
   admin_users: AdminUsersTable;
   admin_sessions: AdminSessionsTable;
   users: UsersTable;
+  user_preferences: UserPreferencesTable;
+  app_feedback: AppFeedbackTable;
+  content_reports: ContentReportsTable;
   devices: DevicesTable;
   user_identities: UserIdentitiesTable;
   password_credentials: PasswordCredentialsTable;
@@ -608,11 +684,13 @@ export interface DB {
   novel_chapter_revisions: NovelChapterRevisionsTable;
   novel_chapter_unlocks: NovelChapterUnlocksTable;
   novel_read_progress: NovelReadProgressTable;
+  novel_read_daily: NovelReadDailyTable;
   novel_library: NovelLibraryTable;
   novel_import_jobs: NovelImportJobsTable;
   novel_import_chapters: NovelImportChaptersTable;
   spin_config: SpinConfigTable;
   spin_history: SpinHistoryTable;
+  user_boosts: UserBoostsTable;
   fraud_flags: FraudFlagsTable;
   audit_log: AuditLogTable;
   inbox_messages: InboxMessagesTable;

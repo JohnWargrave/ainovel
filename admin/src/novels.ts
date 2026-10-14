@@ -587,6 +587,11 @@ function novelForm(novel: AdminNovel | null): string {
         <label>Default unlock price (coin)<input name="default_unlock_coin" type="number" min="0" max="1000000" step="1" value="${novel?.default_unlock_coin ?? 0}" required /></label>
         <label class="switch-label"><input name="allow_ad_unlock" type="checkbox" ${(novel?.allow_ad_unlock ?? true) ? 'checked' : ''} /> Allow unlocking with a rewarded ad</label>
       </fieldset>
+      <fieldset class="check-group field-wide"><legend>Shown to readers</legend>
+        <label>Rating<input name="rating" type="number" min="0" max="5" step="0.1" value="${novel?.rating ?? ''}" placeholder="Empty = no stars" /><small>0–5, one decimal.</small></label>
+        <label class="switch-label"><input name="ai_generated" type="checkbox" ${novel?.ai_generated ? 'checked' : ''} /> AI-generated</label>
+        <label class="switch-label"><input name="editor_reviewed" type="checkbox" ${novel?.editor_reviewed ? 'checked' : ''} /> Editor reviewed</label>
+      </fieldset>
       <label class="switch-label"><input name="is_featured" type="checkbox" ${novel?.is_featured ? 'checked' : ''} /> Featured on the app home</label>
       <label>Featured rank<input name="featured_rank" type="number" min="-100000" max="100000" step="1" value="${novel?.featured_rank ?? 0}" /><small>Lower shows first.</small></label>
     </fieldset>
@@ -607,6 +612,7 @@ function novelInputFromForm(form: HTMLFormElement): NovelInput {
   const nullable = (key: string): string | null => text(key) || null;
   const regions = splitValues(values.get('regions'));
   const vipFrom = text('vip_from_chapter');
+  const rating = text('rating');
   return {
     title: text('title'),
     ...(text('slug') ? { slug: text('slug') } : {}),
@@ -625,6 +631,9 @@ function novelInputFromForm(form: HTMLFormElement): NovelInput {
     default_unlock_coin: Number(text('default_unlock_coin') || 0),
     allow_ad_unlock: values.get('allow_ad_unlock') === 'on',
     category_ids: values.getAll('category_ids').map(String),
+    rating: rating ? Number(rating) : null,
+    ai_generated: values.get('ai_generated') === 'on',
+    editor_reviewed: values.get('editor_reviewed') === 'on',
   };
 }
 
@@ -649,6 +658,7 @@ function novelSidebar(novel: AdminNovel): string {
         <dt>Published chapters</dt><dd>${integer(novel.chapter_count)}</dd>
         <dt>All chapters</dt><dd>${integer(novel.total_chapter_count)}</dd>
         <dt>Words</dt><dd>${integer(novel.word_count)}</dd>
+        <dt>Readers</dt><dd>${integer(novel.read_count)}</dd>
         <dt>Created</dt><dd>${formatDate(novel.created_at)}</dd>
       </dl>
     </article>

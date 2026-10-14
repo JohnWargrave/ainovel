@@ -117,6 +117,8 @@ export const LoginRewardOffersResponseSchema = Type.Object({
       total_coin: Type.Integer({ minimum: 0 }),
     }),
   ),
+  // link_required: a guest's welcome bonus waits until they link an account — show it as pending.
+  welcome_mode: Type.Union([Type.Literal('instant'), Type.Literal('link_required')]),
   updated_at: Type.String(),
 });
 
@@ -138,6 +140,8 @@ export const ActiveSessionsResponseSchema = Type.Object({ items: Type.Array(Acti
 
 export const MeResponseSchema = Type.Object({
   id: Type.String(),
+  // Display-only numeric ID ("ID 10284731"), as a string like other BIGINTs.
+  public_id: Type.String(),
   username: Type.String(),
   avatar_url: Type.Union([Type.String(), Type.Null()]),
   auth_provider: Type.String(),
@@ -147,6 +151,17 @@ export const MeResponseSchema = Type.Object({
   wallet: Type.Object({
     available_coin: Type.String(),
     pending_coin: Type.String(),
+  }),
+  active_boost: Type.Union([
+    Type.Object({ multiplier: Type.Integer(), expires_at: Type.String() }),
+    Type.Null(),
+  ]),
+  // The one-time welcome bonus: its amount, whether this account has received it, and the mode
+  // (under link_required a guest receives it by linking an account).
+  welcome: Type.Object({
+    coin: Type.Integer(),
+    claimed: Type.Boolean(),
+    mode: Type.Union([Type.Literal('instant'), Type.Literal('link_required')]),
   }),
 });
 export type MeResponse = Static<typeof MeResponseSchema>;

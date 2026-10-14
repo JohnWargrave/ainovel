@@ -24,6 +24,7 @@ export const OfferwallOfferSchema = Type.Object({
   description: Type.String(),
   icon_url: Type.Union([Type.String(), Type.Null()]),
   badge_text: Type.Union([Type.String(), Type.Null()]),
+  reward_text: Type.Union([Type.String(), Type.Null()]),
   placement: Type.Union([Type.String(), Type.Null()]),
   region_ids: Type.Array(Type.String()),
   sort_order: Type.Integer(),
@@ -52,6 +53,7 @@ export const CreateOfferwallOfferBodySchema = Type.Object({
   description: Type.Optional(Type.String({ maxLength: 500 })),
   icon_url: Type.Optional(NullableStringSchema),
   badge_text: Type.Optional(Type.Union([Type.String({ maxLength: 40 }), Type.Null()])),
+  reward_text: Type.Optional(Type.Union([Type.Null(), Type.String({ maxLength: 40 })])),
   placement: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
   region_ids: Type.Array(Type.String({ minLength: 1, maxLength: 16 }), {
     minItems: 1,
@@ -72,6 +74,7 @@ export const UpdateOfferwallOfferBodySchema = Type.Partial(
     description: Type.String({ maxLength: 500 }),
     icon_url: NullableStringSchema,
     badge_text: Type.Union([Type.String({ maxLength: 40 }), Type.Null()]),
+    reward_text: Type.Union([Type.Null(), Type.String({ maxLength: 40 })]),
     placement: Type.Union([Type.String({ maxLength: 255 }), Type.Null()]),
     region_ids: Type.Array(Type.String({ minLength: 1, maxLength: 16 }), {
       minItems: 1,

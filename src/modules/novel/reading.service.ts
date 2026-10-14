@@ -2,11 +2,12 @@ import { uuidv7 } from 'uuidv7';
 import type { Transaction } from 'kysely';
 import { db } from '../../db/index.js';
 import type { DB } from '../../db/types.js';
-import { dayWindow } from '../../lib/day-window.js';
+import { dayKey, dayWindow } from '../../lib/day-window.js';
 import { lockRedis } from '../../redis/index.js';
 import { creditInTransaction } from '../wallet-ledger/ledger.service.js';
 import { recordMint } from '../wallet-ledger/economy-counters.js';
 import { loadUserRegionFeatures } from '../earning/region-features.js';
+import { activeBoost } from '../spin/boost.service.js';
 import {
   chapterLockedError,
   findReadableChapter,
@@ -148,6 +149,31 @@ export async function recordReadHeartbeat(
     }
     const scrollRatio = Math.max(Number(row.max_scroll_ratio), body.scroll_ratio);
     const complete = readTimeS >= requiredS && scrollRatio >= feature.completion_scroll_ratio;
+    const gainedS = readTimeS - row.read_time_s;
+    const newlyCompleted = complete && row.completed_at === null;
+    if (gainedS > 0 || newlyCompleted) {
+      // Daily totals for the progress tasks, keyed on the region-local day like every daily reset.
+      await trx
+        .insertInto('novel_read_daily')
+        .values({
+          user_id: userId,
+          day: dayKey(timezone, now),
+          read_seconds: gainedS,
+          chapters_completed: newlyCompleted ? 1 : 0,
+        })
+        .onConflict((oc) =>
+          oc.columns(['user_id', 'day']).doUpdateSet((eb) => ({
+            read_seconds: eb('novel_read_daily.read_seconds', '+', gainedS),
+            chapters_completed: eb(
+              'novel_read_daily.chapters_completed',
+              '+',
+              newlyCompleted ? 1 : 0,
+            ),
+            updated_at: now,
+          })),
+        )
+        .execute();
+    }
 
     await trx
       .updateTable('novel_read_progress')
@@ -155,7 +181,7 @@ export async function recordReadHeartbeat(
         read_time_s: readTimeS,
         max_scroll_ratio: scrollRatio.toFixed(3),
         last_heartbeat_at: now,
-        ...(complete && row.completed_at === null ? { completed_at: now } : {}),
+        ...(newlyCompleted ? { completed_at: now } : {}),
       })
       .where('id', '=', row.id)
       .execute();
@@ -163,11 +189,15 @@ export async function recordReadHeartbeat(
     const rewardEligible = !vip && feature.enabled && feature.chapter_reward_coin > 0;
     const rewardedToday = await countRewardedToday(trx, userId, timezone, now);
     const remainingToday = Math.max(feature.chapter_reward_daily_cap - rewardedToday, 0);
+    // Read on every beat so the reader can show "×2" while a boost runs, not only on the paying one.
+    const boost = await activeBoost(trx, userId, now);
+    const multiplier = boost?.multiplier ?? 1;
     const base = {
       read_seconds: readTimeS,
       required_seconds: requiredS,
       scroll_ratio: scrollRatio,
       reward_eligible: rewardEligible,
+      boost_multiplier: multiplier,
     };
     const unpaid = {
       response: {
@@ -187,15 +217,17 @@ export async function recordReadHeartbeat(
       return unpaid;
     }
 
+    const rewardCoin = feature.chapter_reward_coin * multiplier;
     const ledger = await creditInTransaction(trx, {
       userId,
       entryType: 'NOVEL_READ_CREDIT',
-      amount: feature.chapter_reward_coin,
+      amount: rewardCoin,
       refType: 'novel_chapter',
       refId: chapter.id,
       // Keyed on the chapter, so even a duplicate progress row could never pay twice.
       idempotencyKey: `novel-read:${userId}:${chapter.id}`,
-      note: 'Chapter reading reward',
+      note:
+        multiplier > 1 ? `Chapter reading reward ×${String(multiplier)}` : 'Chapter reading reward',
     });
     await trx
       .updateTable('novel_read_progress')
@@ -208,7 +240,7 @@ export async function recordReadHeartbeat(
       response: {
         ...base,
         rewarded: true,
-        credited_coin: feature.chapter_reward_coin,
+        credited_coin: rewardCoin,
         new_balance: ledger.balanceAfter,
         daily_remaining: Math.max(remainingToday - 1, 0),
       },

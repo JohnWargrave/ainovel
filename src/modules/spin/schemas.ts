@@ -30,6 +30,20 @@ export const SpinBodySchema = Type.Object({
 });
 export type SpinBody = Static<typeof SpinBodySchema>;
 
+// The daily free spin needs no ad. An intent is still accepted (and burned) so builds that show an
+// ad before the free spin keep working. Null admits a bodyless POST, as IntentBodySchema does.
+export const FreeSpinBodySchema = Type.Union([
+  Type.Object({ intent_id: Type.Optional(Type.String({ format: 'uuid' })) }),
+  Type.Null(),
+]);
+export type FreeSpinBody = Static<typeof FreeSpinBodySchema>;
+
+// A running reward multiplier from a "boost" prize. Reading rewards are multiplied while it lasts.
+export const ActiveBoostSchema = Type.Object({
+  multiplier: Type.Integer(),
+  expires_at: Type.String(),
+});
+
 export const SpinStateResponseSchema = Type.Object({
   // Always "0" since spins became ad-funded. Retained so clients that read it keep parsing.
   ticket_coin: Type.String(),
@@ -46,6 +60,7 @@ export const SpinStateResponseSchema = Type.Object({
   free_prizes_display: Type.Array(PrizeDisplaySchema),
   // Backward-compatible alias for clients that shipped before the two tables were exposed.
   prizes_display: Type.Array(PrizeDisplaySchema),
+  active_boost: Type.Union([ActiveBoostSchema, Type.Null()]),
 });
 export type SpinStateResponse = Static<typeof SpinStateResponseSchema>;
 
@@ -54,6 +69,9 @@ export const SpinResponseSchema = Type.Object({
   prize_type: SpinPrizeTypeSchema,
   prize_value: Type.String(),
   new_balance: Type.String(),
+  // Present only when the prize was a boost: the window it ends up running in (queued behind any
+  // boost already active).
+  boost: Type.Optional(ActiveBoostSchema),
 });
 export type SpinResponse = Static<typeof SpinResponseSchema>;
 

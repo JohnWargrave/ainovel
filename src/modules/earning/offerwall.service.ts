@@ -103,6 +103,7 @@ export async function getOfferwallOffers(regionId: string): Promise<OfferwallOff
         description: offer.description,
         icon_url: offer.icon_url ?? provider.icon_url,
         badge_text: offer.badge_text,
+        reward_text: offer.reward_text,
         placement: offer.placement ?? placementFor(offer.provider, provider.placement),
       },
     ];

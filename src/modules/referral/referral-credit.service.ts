@@ -19,7 +19,7 @@ import { getReferralFeature } from './region-feature.js';
 // (so "no hold" isn't an option), and hold-release.ts's sweep (`hold_until <= now()`) structurally
 // never matches a date this far out — the reset action (a plain UPDATE) is trivially available to a
 // future admin review flow without touching the generic hold-release primitive.
-const FROZEN_HOLD_UNTIL = new Date('2099-01-01T00:00:00Z');
+export const FROZEN_HOLD_UNTIL = new Date('2099-01-01T00:00:00Z');
 
 const MIN_REFEREES_FOR_CLAWBACK_RATE = 5; // mirrors E01's MIN_EVENTS
 const CLAWBACK_RATE_THRESHOLD = 0.3; // 11-REFERRAL.md §3 RF04

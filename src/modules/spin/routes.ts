@@ -2,17 +2,24 @@ import type { FastifyInstance } from 'fastify';
 import type { AuthDeps } from '../auth/auth.service.js';
 import { AppHeadersSchema } from '../auth/schemas.js';
 import { AppError } from '../../lib/errors.js';
+import { checkSubjectRateLimit } from '../../lib/rate-limit.js';
 import { displayName } from '../../lib/display-name.js';
 import { createAuthGuard } from '../../plugins/auth-guard.js';
 import { db } from '../../db/index.js';
 import { getSpinState, performFreeSpin, performPaidSpin } from './spin.service.js';
 import {
+  FreeSpinBodySchema,
   RecentWinsResponseSchema,
   SpinBodySchema,
   SpinResponseSchema,
   SpinStateResponseSchema,
+  type FreeSpinBody,
   type SpinBody,
 } from './schemas.js';
+
+// The free spin no longer costs an ad, so nothing upstream throttles it; one per day is enforced in
+// the transaction, this just keeps a retry loop from hammering that transaction.
+const FREE_SPIN_RATE_LIMIT = { windowS: 60, max: 10 } as const;
 
 export function registerSpinRoutes(app: FastifyInstance, deps: Pick<AuthDeps, 'accessJwt'>): void {
   const authGuard = createAuthGuard(deps.accessJwt);
@@ -51,13 +58,13 @@ export function registerSpinRoutes(app: FastifyInstance, deps: Pick<AuthDeps, 'a
     },
   );
 
-  app.post<{ Body: SpinBody }>(
+  app.post<{ Body: FreeSpinBody | undefined }>(
     '/spin/free',
     {
       preHandler: authGuard,
       schema: {
         headers: AppHeadersSchema,
-        body: SpinBodySchema,
+        body: FreeSpinBodySchema,
         response: { 200: SpinResponseSchema },
       },
     },
@@ -65,7 +72,13 @@ export function registerSpinRoutes(app: FastifyInstance, deps: Pick<AuthDeps, 'a
       if (!request.authUser) {
         throw new AppError('UNAUTHORIZED', 'Missing bearer token', 401);
       }
-      const result = await performFreeSpin(request.authUser.sub, request.body.intent_id);
+      await checkSubjectRateLimit(
+        'spin-free',
+        request.authUser.sub,
+        FREE_SPIN_RATE_LIMIT.windowS,
+        FREE_SPIN_RATE_LIMIT.max,
+      );
+      const result = await performFreeSpin(request.authUser.sub, request.body?.intent_id);
       reply.code(200).send(result);
     },
   );

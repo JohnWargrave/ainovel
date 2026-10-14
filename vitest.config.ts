@@ -23,6 +23,7 @@ export default defineConfig({
       TRUST_PROXY: '127.0.0.1/32',
       MIN_SUPPORTED_APP_VERSION: '1.0.0',
       REFERRAL_SHARE_BASE_URL: 'https://links.ainovel.test/r/',
+      NOVEL_SHARE_BASE_URL: 'https://links.ainovel.test/n',
     },
     coverage: {
       provider: 'v8',

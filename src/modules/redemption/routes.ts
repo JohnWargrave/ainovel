@@ -47,7 +47,11 @@ export function registerRedemptionRoutes(
       if (!request.authUser) {
         throw new AppError('UNAUTHORIZED', 'Missing bearer token', 401);
       }
-      const result = await createRedemption(request.authUser.sub, request.body.catalog_item_id);
+      const result = await createRedemption(
+        request.authUser.sub,
+        request.body.catalog_item_id,
+        request.body.recipient_email,
+      );
       reply.code(200).send(result);
     },
   );

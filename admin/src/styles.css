@@ -1642,6 +1642,42 @@ dialog h3 {
   margin-bottom: var(--space-sm);
 }
 
+/* The prize table needs the full row; the cap-only forms beside it stay two-up. */
+.spin-config-form {
+  grid-column: 1 / -1;
+}
+
+.prize-editor {
+  overflow-x: auto;
+}
+
+.prize-table td {
+  padding-right: var(--space-xs);
+}
+
+.prize-table input,
+.prize-table select {
+  width: 100%;
+  min-width: 72px;
+}
+
+.prize-table .prize-slot,
+.prize-table .prize-chance {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.prize-editor-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.prize-ev-invalid {
+  color: var(--color-error);
+}
+
 .redemption-settings-grid,
 .referral-settings-grid {
   display: grid;

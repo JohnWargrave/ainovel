@@ -218,6 +218,7 @@ describe('app surface endpoints', () => {
     expect(body.enabled).toBe(true);
     expect(body.offers.map((offer) => offer.id)).toEqual(['offer1', 'offer2']);
     expect(body.offers.map((offer) => offer.provider)).toEqual(['tapjoy', 'pubscale']);
+    for (const offer of body.offers) expect(offer).toHaveProperty('reward_text', null);
     const ids = body.networks.map((network) => network.id);
     expect(ids).toContain('pubscale');
     // AdGate has no credentials and no network_config row — listing it rendered a dead tile.
@@ -423,6 +424,66 @@ describe('app surface endpoints', () => {
       expect(filteredItems).toHaveLength(1);
       expect(filteredItems[0]?.offerwall?.provider).toBe(provider);
     }
+  });
+
+  it('lists coin still on hold and when the next of it is released', async () => {
+    const userId = await createTestUser();
+    const soon = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const later = new Date(Date.now() + 72 * 60 * 60 * 1000);
+    const entry = (
+      amount: number,
+      bucket: 'available' | 'pending',
+      holdUntil: Date | null,
+    ): {
+      id: string;
+      user_id: string;
+      entry_type: 'REFERRAL_CREDIT';
+      amount: number;
+      bucket: 'available' | 'pending';
+      balance_after: number;
+      hold_until: Date | null;
+    } => ({
+      id: uuidv7(),
+      user_id: userId,
+      entry_type: 'REFERRAL_CREDIT',
+      amount,
+      bucket,
+      balance_after: amount,
+      hold_until: holdUntil,
+    });
+    const held = [entry(10, 'pending', later), entry(20, 'pending', soon)];
+    await db
+      .insertInto('coin_ledger')
+      .values([
+        ...held,
+        // Frozen for review: pending, but with no real release date.
+        entry(30, 'pending', new Date('2099-01-01T00:00:00Z')),
+        // Already released: still bucket=pending, hold cleared.
+        entry(40, 'pending', null),
+        entry(50, 'available', null),
+      ])
+      .execute();
+
+    const pending = await app.inject({
+      method: 'GET',
+      url: '/wallet/ledger?bucket=pending',
+      headers: auth(userId),
+    });
+    expect(pending.statusCode).toBe(200);
+    const items = pending.json<{ items: { amount: string; available_at: string | null }[] }>()
+      .items;
+    expect(items.map((item) => item.amount).sort()).toEqual(['10', '20', '30']);
+    const releaseOf = (amount: string): string | null =>
+      items.find((item) => item.amount === amount)?.available_at ?? null;
+    expect(releaseOf('20')).toBe(soon.toISOString());
+    expect(releaseOf('10')).toBe(later.toISOString());
+    expect(releaseOf('30')).toBeNull();
+
+    const wallet = await app.inject({ method: 'GET', url: '/wallet', headers: auth(userId) });
+    expect(wallet.json<{ next_pending_release_at: string | null }>()).toMatchObject({
+      available_coin: '500',
+      next_pending_release_at: soon.toISOString(),
+    });
   });
 
   it('exposes every app-surface route under the /v1 prefix too', async () => {

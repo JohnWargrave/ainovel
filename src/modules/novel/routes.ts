@@ -16,9 +16,12 @@ import {
   NovelDetailSchema,
   NovelListResponseSchema,
   NovelParamsSchema,
+  PreferencesBodySchema,
+  PreferencesResponseSchema,
   ReadChapterParamsSchema,
   ReadHeartbeatBodySchema,
   ReadHeartbeatResponseSchema,
+  ReadingStatsResponseSchema,
   UnlockBodySchema,
   UnlockResponseSchema,
   type ChapterParams,
@@ -26,6 +29,7 @@ import {
   type ListChaptersQuery,
   type ListNovelsQuery,
   type NovelParams,
+  type PreferencesBody,
   type ReadChapterParams,
   type ReadHeartbeatBody,
   type UnlockBody,
@@ -41,6 +45,8 @@ import {
   setBookshelf,
 } from './novel.service.js';
 import { recordReadHeartbeat } from './reading.service.js';
+import { getPreferences, setPreferences } from './preferences.service.js';
+import { getReadingStats } from './reader-stats.service.js';
 import { unlockChapter } from './unlock.service.js';
 
 // Chapter bodies are the product: these budgets are what stops one account from scraping a whole
@@ -119,7 +125,13 @@ export function registerNovelRoutes(app: FastifyInstance, deps: Pick<AuthDeps, '
     async (request, reply) => {
       const sub = userId(request);
       await checkSubjectRateLimit('novel-chapter-read-min', sub, 60, CHAPTER_READ_PER_MINUTE);
-      await checkSubjectRateLimit('novel-chapter-read-hour', sub, 3600, CHAPTER_READ_PER_HOUR);
+      await checkSubjectRateLimit(
+        'novel-chapter-read-hour',
+        sub,
+        3600,
+        CHAPTER_READ_PER_HOUR,
+        'CHAPTER_HOURLY_LIMIT',
+      );
       reply.send(await readChapter(sub, request.params.id, request.params.chapter_no));
     },
   );
@@ -152,6 +164,35 @@ export function registerNovelRoutes(app: FastifyInstance, deps: Pick<AuthDeps, '
       // A ~10s beat is 6/min; 20 leaves room for retries and chapter switches.
       await checkSubjectRateLimit('novel-read-heartbeat', sub, 60, 20);
       reply.send(await recordReadHeartbeat(sub, request.body));
+    },
+  );
+
+  app.get(
+    '/me/stats',
+    { preHandler: authGuard, schema: { response: { 200: ReadingStatsResponseSchema } } },
+    async (request, reply) => {
+      reply.send(await getReadingStats(userId(request)));
+    },
+  );
+
+  app.get(
+    '/me/preferences',
+    { preHandler: authGuard, schema: { response: { 200: PreferencesResponseSchema } } },
+    async (request, reply) => {
+      reply.send(await getPreferences(userId(request)));
+    },
+  );
+
+  app.put<{ Body: PreferencesBody }>(
+    '/me/preferences',
+    {
+      preHandler: authGuard,
+      schema: { body: PreferencesBodySchema, response: { 200: PreferencesResponseSchema } },
+    },
+    async (request, reply) => {
+      const sub = userId(request);
+      await checkSubjectRateLimit('me-preferences', sub, 60, 10);
+      reply.send(await setPreferences(sub, request.body.category_ids));
     },
   );
 

@@ -1,10 +1,13 @@
 import { sql } from 'kysely';
 import { db } from '../../db/index.js';
+import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
+import { shareUrl } from '../../lib/share-url.js';
 import {
   chapterUnlockPrice,
   chapterVisible,
   chapterLockedError,
+  loadChapterPreview,
   findReadableChapter,
   hasUnlocked,
   isChapterVip,
@@ -12,6 +15,7 @@ import {
   novelVisibleTo,
   type Reader,
 } from './access.js';
+import { preferredCategoryIds } from './preferences.service.js';
 import { parseNovelFeature, requiredReadSeconds, type NovelFeature } from './region-feature.js';
 import { foldForSearch } from './text.js';
 import type {
@@ -42,6 +46,11 @@ const SUMMARY_COLUMNS = [
   'novels.chapter_count',
   'novels.word_count',
   'novels.updated_at',
+  'novels.language',
+  'novels.rating',
+  'novels.read_count',
+  'novels.ai_generated',
+  'novels.editor_reviewed',
 ] as const;
 
 interface SummaryRow {
@@ -56,6 +65,11 @@ interface SummaryRow {
   chapter_count: number;
   word_count: string;
   updated_at: Date;
+  language: string;
+  rating: string | null;
+  read_count: string;
+  ai_generated: boolean;
+  editor_reviewed: boolean;
 }
 
 async function toSummaries(rows: readonly SummaryRow[]): Promise<NovelSummary[]> {
@@ -92,7 +106,50 @@ async function toSummaries(rows: readonly SummaryRow[]): Promise<NovelSummary[]>
     chapter_count: row.chapter_count,
     word_count: Number(row.word_count),
     updated_at: new Date(row.updated_at).toISOString(),
+    language: row.language,
+    rating: row.rating === null ? null : Number(row.rating),
+    read_count: Number(row.read_count),
+    ai_generated: row.ai_generated,
+    editor_reviewed: row.editor_reviewed,
   }));
+}
+
+// Novels in the reader's preferred genres that they have not opened yet, most-read first.
+async function forYouRows(reader: Reader): Promise<SummaryRow[]> {
+  const categoryIds = await preferredCategoryIds(reader.id);
+  if (categoryIds.length === 0) return [];
+  return db
+    .selectFrom('novels')
+    .select(SUMMARY_COLUMNS)
+    .where(novelVisibleTo(reader))
+    .where((eb) =>
+      eb.exists(
+        eb
+          .selectFrom('novel_category_links')
+          .select('novel_category_links.novel_id')
+          .whereRef('novel_category_links.novel_id', '=', 'novels.id')
+          .where('novel_category_links.category_id', 'in', categoryIds),
+      ),
+    )
+    .where((eb) =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom('novel_library')
+            .select('novel_library.novel_id')
+            .whereRef('novel_library.novel_id', '=', 'novels.id')
+            .where('novel_library.user_id', '=', reader.id),
+        ),
+      ),
+    )
+    .orderBy('novels.read_count', 'desc')
+    .orderBy('novels.updated_at', 'desc')
+    .limit(HOME_SECTION_SIZE)
+    .execute();
+}
+
+function novelShareUrl(slug: string): string | undefined {
+  return shareUrl(env.NOVEL_SHARE_BASE_URL, slug);
 }
 
 function escapeLike(value: string): string {
@@ -102,7 +159,7 @@ function escapeLike(value: string): string {
 export async function listNovels(
   userId: string,
   query: ListNovelsQuery,
-): Promise<{ items: NovelSummary[]; next_cursor: string | null }> {
+): Promise<{ items: NovelSummary[]; next_cursor: string | null; total: number }> {
   const reader = await loadReader(userId);
   const limit = query.limit ?? DEFAULT_PAGE_SIZE;
   const offset = Number(query.cursor ?? 0);
@@ -131,6 +188,10 @@ export async function listNovels(
   if (query.completion_status) {
     builder = builder.where('novels.completion_status', '=', query.completion_status);
   }
+  if (query.language) {
+    builder = builder.where('novels.language', '=', query.language);
+  }
+  const countQuery = builder.clearSelect().select((eb) => eb.fn.countAll<string>().as('total'));
 
   switch (query.sort ?? 'updated') {
     case 'new':
@@ -152,14 +213,18 @@ export async function listNovels(
 
   // Offset rather than keyset: "popular" orders by an aggregate with no stable key, and the catalog
   // is small enough that deep offsets are not a concern.
-  const rows = await builder
-    .limit(limit + 1)
-    .offset(offset)
-    .execute();
+  const [rows, count] = await Promise.all([
+    builder
+      .limit(limit + 1)
+      .offset(offset)
+      .execute(),
+    countQuery.executeTakeFirstOrThrow(),
+  ]);
   const page = rows.slice(0, limit);
   return {
     items: await toSummaries(page),
     next_cursor: rows.length > limit ? String(offset + limit) : null,
+    total: Number(count.total),
   };
 }
 
@@ -180,15 +245,17 @@ export async function getHome(userId: string): Promise<{
   featured: NovelSummary[];
   latest: NovelSummary[];
   popular: NovelSummary[];
+  for_you: NovelSummary[];
   continue_reading: {
     novel: NovelSummary;
     last_chapter_no: number | null;
+    last_chapter_title: string | null;
     last_read_at: string | null;
   }[];
 }> {
   const reader = await loadReader(userId);
   const since = new Date(Date.now() - POPULAR_WINDOW_MS);
-  const [featured, latest, popular, recent] = await Promise.all([
+  const [featured, latest, popular, recent, forYou] = await Promise.all([
     db
       .selectFrom('novels')
       .select(SUMMARY_COLUMNS)
@@ -219,19 +286,29 @@ export async function getHome(userId: string): Promise<{
     db
       .selectFrom('novel_library')
       .innerJoin('novels', 'novels.id', 'novel_library.novel_id')
-      .select([...SUMMARY_COLUMNS, 'novel_library.last_chapter_no', 'novel_library.last_read_at'])
+      .leftJoin('novel_chapters', 'novel_chapters.id', 'novel_library.last_chapter_id')
+      .select([
+        ...SUMMARY_COLUMNS,
+        'novel_library.last_chapter_no',
+        'novel_chapters.title as last_chapter_title',
+        'novel_library.last_read_at',
+      ])
       .where('novel_library.user_id', '=', reader.id)
       .where('novel_library.last_read_at', 'is not', null)
       .where(novelVisibleTo(reader))
       .orderBy('novel_library.last_read_at', 'desc')
       .limit(CONTINUE_READING_SIZE)
       .execute(),
+    forYouRows(reader),
   ]);
   const recentSummaries = await toSummaries(recent);
+  const popularSummaries = await toSummaries(popular);
   return {
     featured: await toSummaries(featured),
     latest: await toSummaries(latest),
-    popular: await toSummaries(popular),
+    popular: popularSummaries,
+    // No genres picked, or nothing new left in them: the row still shows something worth reading.
+    for_you: forYou.length > 0 ? await toSummaries(forYou) : popularSummaries,
     continue_reading: recent.flatMap((row, index) => {
       const novel = recentSummaries[index];
       if (!novel) return [];
@@ -239,6 +316,7 @@ export async function getHome(userId: string): Promise<{
         {
           novel,
           last_chapter_no: row.last_chapter_no,
+          last_chapter_title: row.last_chapter_title,
           last_read_at: row.last_read_at ? new Date(row.last_read_at).toISOString() : null,
         },
       ];
@@ -249,7 +327,6 @@ export async function getHome(userId: string): Promise<{
 interface VisibleNovel extends SummaryRow {
   alt_titles: string[];
   translator: string | null;
-  language: string;
   vip_from_chapter: number | null;
   default_unlock_coin: number;
   allow_ad_unlock: boolean;
@@ -262,7 +339,6 @@ async function findVisibleNovel(reader: Reader, novelId: string): Promise<Visibl
       ...SUMMARY_COLUMNS,
       'novels.alt_titles',
       'novels.translator',
-      'novels.language',
       'novels.vip_from_chapter',
       'novels.default_unlock_coin',
       'novels.allow_ad_unlock',
@@ -285,14 +361,15 @@ export async function getNovel(userId: string, novelId: string): Promise<NovelDe
     .executeTakeFirst();
   const [summary] = await toSummaries([novel]);
   if (!summary) throw new AppError('NOVEL_NOT_FOUND', 'Novel not found', 404);
+  const shareLink = novelShareUrl(novel.slug);
   return {
     ...summary,
     alt_titles: novel.alt_titles,
     translator: novel.translator,
-    language: novel.language,
     vip_from_chapter: novel.vip_from_chapter,
     default_unlock_coin: novel.default_unlock_coin,
     allow_ad_unlock: novel.allow_ad_unlock,
+    ...(shareLink ? { share_url: shareLink } : {}),
     library: {
       in_bookshelf: library?.in_bookshelf ?? false,
       last_chapter_no: library?.last_chapter_no ?? null,
@@ -378,7 +455,7 @@ export async function readChapter(
   const chapter = await findReadableChapter(reader, { novelId, chapterNo }, now);
   const vip = isChapterVip(chapter, chapter);
   if (vip && !(await hasUnlocked(reader.id, chapter.id))) {
-    throw chapterLockedError(chapter);
+    throw chapterLockedError(chapter, await loadChapterPreview(chapter));
   }
 
   const [content, neighbours, progress, feature] = await Promise.all([
@@ -406,7 +483,7 @@ export async function readChapter(
   ]);
 
   // Opening a chapter is the reliable "where did I stop" signal — heartbeats may never arrive.
-  await db
+  const opened = await db
     .insertInto('novel_library')
     .values({
       user_id: reader.id,
@@ -423,7 +500,17 @@ export async function readChapter(
         updated_at: now,
       }),
     )
-    .execute();
+    // xmax is 0 only on a freshly inserted row, so this is "first chapter this reader has opened".
+    .returning(sql<boolean>`xmax = 0`.as('inserted'))
+    .executeTakeFirstOrThrow();
+  if (opened.inserted) {
+    // updated_at deliberately untouched: it orders "recently updated", which means new content.
+    await db
+      .updateTable('novels')
+      .set({ read_count: sql`read_count + 1` })
+      .where('id', '=', novelId)
+      .execute();
+  }
 
   return {
     id: chapter.id,
@@ -453,6 +540,7 @@ export async function getLibrary(
     novel: NovelSummary;
     in_bookshelf: boolean;
     last_chapter_no: number | null;
+    last_chapter_title: string | null;
     last_read_at: string | null;
   }[];
 }> {
@@ -460,10 +548,12 @@ export async function getLibrary(
   let builder = db
     .selectFrom('novel_library')
     .innerJoin('novels', 'novels.id', 'novel_library.novel_id')
+    .leftJoin('novel_chapters', 'novel_chapters.id', 'novel_library.last_chapter_id')
     .select([
       ...SUMMARY_COLUMNS,
       'novel_library.in_bookshelf',
       'novel_library.last_chapter_no',
+      'novel_chapters.title as last_chapter_title',
       'novel_library.last_read_at',
     ])
     .where('novel_library.user_id', '=', reader.id)
@@ -487,6 +577,7 @@ export async function getLibrary(
           novel,
           in_bookshelf: row.in_bookshelf,
           last_chapter_no: row.last_chapter_no,
+          last_chapter_title: row.last_chapter_title,
           last_read_at: row.last_read_at ? new Date(row.last_read_at).toISOString() : null,
         },
       ];

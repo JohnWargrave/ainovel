@@ -65,6 +65,7 @@ function serializeOffer(row: {
   description: string;
   icon_url: string | null;
   badge_text: string | null;
+  reward_text: string | null;
   placement: string | null;
   region_ids: string[];
   sort_order: number;
@@ -82,6 +83,7 @@ function serializeOffer(row: {
     description: row.description,
     icon_url: row.icon_url,
     badge_text: row.badge_text,
+    reward_text: row.reward_text,
     placement: row.placement,
     region_ids: row.region_ids,
     sort_order: row.sort_order,
@@ -198,6 +200,7 @@ export async function createOfferwallOffer(
           description: body.description ?? '',
           icon_url: body.icon_url ?? null,
           badge_text: body.badge_text ?? null,
+          reward_text: body.reward_text ?? null,
           placement: body.placement ?? null,
           region_ids: body.region_ids,
           sort_order: body.sort_order ?? 0,
@@ -260,6 +263,7 @@ export async function updateOfferwallOffer(
           ...(patch.description !== undefined ? { description: patch.description } : {}),
           ...(patch.icon_url !== undefined ? { icon_url: patch.icon_url } : {}),
           ...(patch.badge_text !== undefined ? { badge_text: patch.badge_text } : {}),
+          ...(patch.reward_text !== undefined ? { reward_text: patch.reward_text } : {}),
           ...(patch.placement !== undefined ? { placement: patch.placement } : {}),
           ...(patch.region_ids !== undefined ? { region_ids: patch.region_ids } : {}),
           ...(patch.sort_order !== undefined ? { sort_order: patch.sort_order } : {}),

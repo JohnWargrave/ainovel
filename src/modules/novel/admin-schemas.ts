@@ -70,6 +70,10 @@ export const AdminNovelSchema = Type.Object({
   vip_from_chapter: NullableInteger,
   default_unlock_coin: Type.Integer(),
   allow_ad_unlock: Type.Boolean(),
+  rating: Type.Union([Type.Number(), Type.Null()]),
+  read_count: Type.Integer(),
+  ai_generated: Type.Boolean(),
+  editor_reviewed: Type.Boolean(),
   chapter_count: Type.Integer(),
   total_chapter_count: Type.Integer(),
   word_count: Type.Integer(),
@@ -123,6 +127,11 @@ const NovelFields = {
   default_unlock_coin: Type.Integer({ minimum: 0, maximum: 1_000_000 }),
   allow_ad_unlock: Type.Boolean(),
   category_ids: Type.Array(Uuid, { maxItems: 20 }),
+  // Shown on the app's story cards; null hides the stars. Stored to one decimal. Null comes first:
+  // with coerceTypes, a number branch tried first would turn null into 0 and accept it.
+  rating: Type.Union([Type.Null(), Type.Number({ minimum: 0, maximum: 5 })]),
+  ai_generated: Type.Boolean(),
+  editor_reviewed: Type.Boolean(),
 };
 
 export const CreateNovelSchema = Type.Object({
@@ -144,6 +153,9 @@ export const CreateNovelSchema = Type.Object({
   default_unlock_coin: Type.Optional(NovelFields.default_unlock_coin),
   allow_ad_unlock: Type.Optional(NovelFields.allow_ad_unlock),
   category_ids: Type.Optional(NovelFields.category_ids),
+  rating: Type.Optional(NovelFields.rating),
+  ai_generated: Type.Optional(NovelFields.ai_generated),
+  editor_reviewed: Type.Optional(NovelFields.editor_reviewed),
 });
 export type CreateNovelInput = Static<typeof CreateNovelSchema>;
 

@@ -16,20 +16,31 @@ export async function checkRateLimit(
 const INCR_WITH_TTL = `
 local count = redis.call('INCR', KEYS[1])
 if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
-return count
+return {count, redis.call('PTTL', KEYS[1])}
 `;
 
+// `limitedCode` swaps the generic RATE_LIMITED for an error the app handles on its own screen; that
+// error carries retry_at, when the window resets.
 export async function checkSubjectRateLimit(
   keyPrefix: string,
   subject: string,
   windowS: number,
   maxRequests: number,
+  limitedCode?: string,
 ): Promise<void> {
   const key = `${keyPrefix}:ratelimit:${subject}`;
   // INCR and EXPIRE in one script: as two round-trips, a failed EXPIRE would leave a counter that
   // never expires and block the subject permanently.
-  const count = Number(await rateLimitRedis.eval(INCR_WITH_TTL, 1, key, windowS));
-  if (count > maxRequests) {
+  const [count, ttlMs] = (await rateLimitRedis.eval(INCR_WITH_TTL, 1, key, windowS)) as [
+    number,
+    number,
+  ];
+  if (count <= maxRequests) return;
+  if (!limitedCode) {
     throw new AppError('RATE_LIMITED', `Too many requests to ${keyPrefix}`, 429);
   }
+  const retryAt = new Date(Date.now() + Math.max(ttlMs, 0));
+  throw new AppError(limitedCode, `Too many requests to ${keyPrefix}`, 429, undefined, {
+    retry_at: retryAt.toISOString(),
+  });
 }

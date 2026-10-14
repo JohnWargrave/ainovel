@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { uuidv7 } from 'uuidv7';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/index.js';
+import { cacheRedis } from '../../src/redis/index.js';
 
 const ADMIN_API_KEY = 'test-admin-api-key';
 const ADMIN_CSRF_TOKEN = 'test-admin-csrf-token';
@@ -72,18 +73,29 @@ describe('coin reward settings admin API', () => {
     const before = get.json<SettingsBody>();
     expect(before.welcome_coin).toBe(10_000);
     expect(before.google_login).toBe(2_000);
+    // GET /config carries the welcome bonus, so saving must drop its region caches. A key of its own
+    // keeps other suites, which fetch /config for real regions in parallel, from refilling it.
+    const cacheKey = `config:v1:TEST-${randomUUID()}`;
+    await cacheRedis.set(cacheKey, '{}', 'EX', 60);
 
     const put = await app.inject({
       method: 'PUT',
       url: '/admin/coin-reward-settings',
       headers: adminHeaders(superadminId),
-      payload: { welcome_coin: before.welcome_coin, google_login: before.google_login },
+      // Same values back, so suites signing up guests in parallel are unaffected.
+      payload: {
+        welcome_coin: before.welcome_coin,
+        google_login: before.google_login,
+        welcome_mode: 'instant',
+      },
     });
     expect(put.statusCode).toBe(200);
     expect(put.json<SettingsBody>()).toMatchObject({
       welcome_coin: 10_000,
       google_login: 2_000,
+      welcome_mode: 'instant',
     });
+    expect(await cacheRedis.get(cacheKey)).toBeNull();
 
     const audit = await db
       .selectFrom('audit_log')
@@ -93,8 +105,8 @@ describe('coin reward settings admin API', () => {
       .orderBy('id', 'desc')
       .executeTakeFirstOrThrow();
     expect(audit.detail).toMatchObject({
-      before: { welcome_coin: 10_000, google_login: 2_000 },
-      after: { welcome_coin: 10_000, google_login: 2_000 },
+      before: { welcome_coin: 10_000, google_login: 2_000, welcome_mode: 'instant' },
+      after: { welcome_coin: 10_000, google_login: 2_000, welcome_mode: 'instant' },
     });
   });
 
@@ -119,6 +131,7 @@ describe('coin reward settings admin API', () => {
         total_coin: 12_000,
       },
     ]);
+    expect(response.json<{ welcome_mode: string }>().welcome_mode).toBe('instant');
 
     const versioned = await app.inject({
       method: 'GET',
@@ -152,5 +165,13 @@ describe('coin reward settings admin API', () => {
       payload: { welcome_coin: -1, google_login: 2_000 },
     });
     expect(invalid.statusCode).toBe(400);
+
+    const badMode = await app.inject({
+      method: 'PUT',
+      url: '/admin/coin-reward-settings',
+      headers: adminHeaders(superadminId),
+      payload: { welcome_coin: 10_000, google_login: 2_000, welcome_mode: 'later' },
+    });
+    expect(badMode.statusCode).toBe(400);
   });
 });

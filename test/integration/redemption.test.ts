@@ -82,6 +82,7 @@ async function createCatalogItem(overrides?: {
   coin_price?: number;
   regions?: string[];
   is_active?: boolean;
+  recipient_type?: 'none' | 'paypal_email';
 }): Promise<string> {
   const itemId = uuidv7();
   await db
@@ -96,6 +97,7 @@ async function createCatalogItem(overrides?: {
       coin_price: overrides?.coin_price ?? 1000,
       regions: overrides?.regions ?? ['VN'],
       is_active: overrides?.is_active ?? true,
+      recipient_type: overrides?.recipient_type ?? 'none',
     })
     .execute();
   return itemId;
@@ -637,6 +639,85 @@ describe('redemption core', () => {
         payload: {},
       });
       expect(res.statusCode).toBe(403);
+    });
+  });
+
+  describe('PayPal recipient', () => {
+    it('requires the email, masks it for the user and shows it in full to fulfillment', async () => {
+      const userId = await createTestUser({
+        created_at: new Date(Date.now() - 48 * 60 * 60 * 1000),
+      });
+      const itemId = await createCatalogItem({ recipient_type: 'paypal_email' });
+      const headers = { ...APP_HEADERS, authorization: `Bearer ${tokenFor(userId)}` };
+
+      const missing = await app.inject({
+        method: 'POST',
+        url: '/redemptions',
+        headers,
+        payload: { catalog_item_id: itemId },
+      });
+      expect(missing.statusCode).toBe(400);
+      expect(missing.json<ErrorResponseBody>().error.code).toBe('RECIPIENT_REQUIRED');
+      const wallet = await db
+        .selectFrom('wallets')
+        .select('available_coin')
+        .where('user_id', '=', userId)
+        .executeTakeFirstOrThrow();
+      expect(wallet.available_coin).toBe('100000');
+
+      const invalid = await app.inject({
+        method: 'POST',
+        url: '/redemptions',
+        headers,
+        payload: { catalog_item_id: itemId, recipient_email: 'not-an-email' },
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json<ErrorResponseBody>().error.code).toBe('VALIDATION_ERROR');
+
+      const created = await app.inject({
+        method: 'POST',
+        url: '/redemptions',
+        headers,
+        payload: { catalog_item_id: itemId, recipient_email: 'alice@gmail.com' },
+      });
+      expect(created.statusCode).toBe(200);
+      const body = created.json<RedemptionResponseBody & { recipient_email_masked: string }>();
+      expect(body.recipient_email_masked).toBe('a***@gmail.com');
+      expect(JSON.stringify(body)).not.toContain('alice');
+
+      const adminId = await createAdminUser('fulfillment');
+      const detail = await app.inject({
+        method: 'GET',
+        url: `/admin/redemptions/${body.id}`,
+        headers: adminHeaders(adminId),
+      });
+      expect(detail.json<{ recipient_email: string }>().recipient_email).toBe('alice@gmail.com');
+      const queue = await app.inject({
+        method: 'GET',
+        url: '/admin/redemptions?status=APPROVED',
+        headers: adminHeaders(adminId),
+      });
+      const row = queue
+        .json<{ items: { id: string; recipient_email: string | null }[] }>()
+        .items.find((item) => item.id === body.id);
+      expect(row?.recipient_email).toBe('alice@gmail.com');
+    });
+
+    it('ignores an email sent for a code reward', async () => {
+      const userId = await createTestUser({
+        created_at: new Date(Date.now() - 48 * 60 * 60 * 1000),
+      });
+      const itemId = await createCatalogItem();
+      const res = await app.inject({
+        method: 'POST',
+        url: '/redemptions',
+        headers: { ...APP_HEADERS, authorization: `Bearer ${tokenFor(userId)}` },
+        payload: { catalog_item_id: itemId, recipient_email: 'alice@gmail.com' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(
+        res.json<{ recipient_email_masked: string | null }>().recipient_email_masked,
+      ).toBeNull();
     });
   });
 

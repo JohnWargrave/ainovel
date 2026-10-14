@@ -129,9 +129,12 @@ export interface AuditLogEntry {
   created_at: string;
 }
 
+export type WelcomeMode = 'instant' | 'link_required';
+
 export interface CoinRewardSettings {
   welcome_coin: number;
   google_login: number;
+  welcome_mode: WelcomeMode;
   updated_at: string;
 }
 
@@ -178,7 +181,33 @@ export interface SpinConfigAdmin {
   daily_cap: number;
   is_active: boolean;
   used_by: Array<{ region_id: string; role: 'paid' | 'free' }>;
+  // Stored as-is, so a table the spin would reject (a voucher, a bad boost) still opens here to be fixed.
+  prizes: SpinPrizeAdmin[];
+  // Average coin per spin (boosts count as 0) and the band the server holds this table to on save.
+  ev_coin: number;
+  ev_min: number | null;
+  ev_max: number;
   updated_at: string;
+}
+export type SpinPrizeType = 'coin' | 'boost' | 'voucher';
+export type SpinPrizeTier = 'low' | 'mid' | 'high' | 'jackpot';
+export interface SpinPrizeAdmin {
+  slot: number;
+  type: string;
+  // Coin amount for coin, "multiplier x minutes" (e.g. "2x60") for boost.
+  value: number | string;
+  // Relative odds: a prize's chance is its weight over the sum of all weights.
+  weight: number;
+  tier: string;
+  label: string | null;
+}
+export interface SpinPrizeInput {
+  slot: number;
+  type: Exclude<SpinPrizeType, 'voucher'>;
+  value: number | string;
+  weight: number;
+  tier: SpinPrizeTier;
+  label?: string;
 }
 export interface SpinConfigsData {
   items: SpinConfigAdmin[];
@@ -275,8 +304,12 @@ export interface CatalogItemAdmin {
   stock_note: string | null;
   // 'crawler' or 'manual' — provenance, so an operator knows what the next crawl may overwrite.
   source: string;
+  recipient_type: RecipientType;
   updated_at: string;
 }
+
+// paypal_email: the app collects a PayPal address and fulfillment sends the money to it by hand.
+export type RecipientType = 'none' | 'paypal_email';
 
 export interface CreateCatalogItemInput {
   sku: string;
@@ -290,6 +323,7 @@ export interface CreateCatalogItemInput {
   regions: string[];
   is_active?: boolean;
   stock_note?: string;
+  recipient_type?: RecipientType;
 }
 
 // sku and category are create-only on the server, so the edit form must not offer them.
@@ -359,6 +393,7 @@ export interface OfferwallOffer {
   description: string;
   icon_url: string | null;
   badge_text: string | null;
+  reward_text: string | null;
   placement: string | null;
   region_ids: string[];
   sort_order: number;
@@ -409,6 +444,7 @@ export interface OfferwallOfferInput {
   description?: string;
   icon_url?: string | null;
   badge_text?: string | null;
+  reward_text?: string | null;
   placement?: string | null;
   region_ids: string[];
   sort_order?: number;
@@ -440,6 +476,7 @@ export interface Redemption {
 }
 
 export interface AdminRedemptionSummary extends Redemption {
+  recipient_email: string | null;
   user: {
     id: string;
     email: string | null;
@@ -460,6 +497,8 @@ export interface AdminRedemptionSummary extends Redemption {
 
 export interface RedemptionDetail {
   redemption: Redemption;
+  // Unmasked PayPal address for paypal_email rewards; null for code rewards.
+  recipient_email: string | null;
   user: {
     id: string;
     email: string | null;
@@ -645,6 +684,7 @@ export function getCoinRewardSettings(): Promise<CoinRewardSettings> {
 export function updateCoinRewardSettings(input: {
   welcome_coin: number;
   google_login: number;
+  welcome_mode: WelcomeMode;
 }): Promise<CoinRewardSettings> {
   return api<CoinRewardSettings>('/admin/coin-reward-settings', {
     method: 'PUT',
@@ -696,7 +736,7 @@ export function getSpinConfigs(): Promise<SpinConfigsData> {
 
 export function updateSpinConfig(
   configId: string,
-  input: { daily_cap: number },
+  input: { daily_cap?: number; prizes?: SpinPrizeInput[] },
 ): Promise<SpinConfigAdmin> {
   return api<SpinConfigAdmin>(`/admin/spin/configs/${encodeURIComponent(configId)}`, {
     method: 'PUT',

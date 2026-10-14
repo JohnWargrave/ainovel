@@ -95,7 +95,14 @@ import {
   splitValues,
 } from './format.js';
 import { getNovelSettings, updateNovelSettings, type NovelSettingsData } from './novels-api.js';
+import { clearPrizeDrafts, readPrizes, renderPrizeEditor, wirePrizeEditor } from './spin-prizes.js';
 import { loadNovelsPage, renderNovelsPage, resetNovelsState, type NovelsHost } from './novels.js';
+import {
+  loadFeedbackPage,
+  renderFeedbackPage,
+  resetFeedbackState,
+  type FeedbackHost,
+} from './feedback.js';
 
 type Page =
   | 'dashboard'
@@ -106,6 +113,7 @@ type Page =
   | 'referrals'
   | 'redemptions'
   | 'novels'
+  | 'feedback'
   | 'settings'
   | 'audit';
 type OfferwallTab = 'cards' | 'providers' | 'regions';
@@ -246,6 +254,7 @@ const ICON_PATHS: Record<string, string> = {
     'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
   audit:
     'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8',
+  feedback: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   fold: 'M3 6h18M3 12h12M3 18h18M21 9l-3 3 3 3',
   unfold: 'M3 6h18M9 12h12M3 18h18M3 9l3 3-3 3',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
@@ -264,6 +273,7 @@ const PAGE_META: Record<Page, { label: string; icon: string; group: string }> = 
   users: { label: 'Users', icon: 'users', group: 'Users & growth' },
   referrals: { label: 'Referrals', icon: 'referrals', group: 'Users & growth' },
   redemptions: { label: 'Redemptions', icon: 'redemptions', group: 'Users & growth' },
+  feedback: { label: 'Feedback', icon: 'feedback', group: 'Users & growth' },
   settings: { label: 'Settings', icon: 'settings', group: 'System' },
   audit: { label: 'Audit log', icon: 'audit', group: 'System' },
 };
@@ -284,6 +294,7 @@ function shell(content: string): string {
     'users',
     'referrals',
     'redemptions',
+    'feedback',
     'settings',
     'audit',
   ];
@@ -292,11 +303,12 @@ function shell(content: string): string {
   // readable by analysts (stats) and editable by superadmins.
   const pages =
     role === 'editor'
-      ? allPages.filter((page) => page === 'novels')
+      ? allPages.filter((page) => page === 'novels' || page === 'feedback')
       : allPages.filter(
           (page) =>
             (!['offers', 'settings'].includes(page) || role === 'superadmin') &&
             (page !== 'referrals' || role !== 'fulfillment') &&
+            (page !== 'feedback' || role !== 'fulfillment') &&
             (page !== 'novels' || role === 'analyst' || role === 'superadmin'),
         );
   const groups: Array<[string, Page[]]> = [];
@@ -413,6 +425,7 @@ function wireShell(): void {
       async () => {
         await logout();
         resetNovelsState();
+        resetFeedbackState();
       },
       () => ({
         session: null,
@@ -900,6 +913,7 @@ function offerEditor(data: OfferwallAdminData, offer?: OfferwallOffer): string {
           <label class="field-wide">Description<textarea name="description" rows="3" placeholder="Complete offers and earn coins">${escapeHtml(offer?.description ?? '')}</textarea></label>
           <label>Icon URL<input name="icon_url" type="url" value="${escapeHtml(offer?.icon_url ?? '')}" placeholder="https://…" /></label>
           <label>Badge<input name="badge_text" value="${escapeHtml(offer?.badge_text ?? '')}" placeholder="Featured" /></label>
+          <label>Reward line<input name="reward_text" maxlength="40" value="${escapeHtml(offer?.reward_text ?? '')}" placeholder="Up to $15" /></label>
           <label>Placement override<input name="placement" value="${escapeHtml(offer?.placement ?? '')}" placeholder="Use provider default" /></label>
           <label>Display order<input name="sort_order" type="number" min="0" max="100000" value="${String(offer?.sort_order ?? 0)}" required /></label>
           <label>Starts at<input name="starts_at" type="datetime-local" value="${localDateTime(offer?.starts_at ?? null)}" /></label>
@@ -1151,6 +1165,7 @@ function wireOfferwall(data?: OfferwallAdminData): void {
         description: String(values.get('description') ?? '').trim(),
         icon_url: String(values.get('icon_url') ?? '').trim() || null,
         badge_text: String(values.get('badge_text') ?? '').trim() || null,
+        reward_text: String(values.get('reward_text') ?? '').trim() || null,
         placement: String(values.get('placement') ?? '').trim() || null,
         region_ids: values.getAll('region_ids').map(String),
         sort_order: Number(values.get('sort_order')),
@@ -1794,6 +1809,10 @@ function catalogEditor(item?: CatalogItemAdmin): string {
       <label>Image URL<input name="image_url" type="url" value="${escapeHtml(item?.image_url ?? '')}" /></label>
       <label>Supplier URL<input name="seagm_url" type="url" value="${escapeHtml(item?.seagm_url ?? '')}" /></label>
       <label class="field-wide">Stock note<input name="stock_note" value="${escapeHtml(item?.stock_note ?? '')}" placeholder="Out of stock until Friday" /></label>
+      <label>Delivered as<select name="recipient_type">
+        <option value="none" ${item?.recipient_type === 'paypal_email' ? '' : 'selected'}>Code (pasted by fulfillment)</option>
+        <option value="paypal_email" ${item?.recipient_type === 'paypal_email' ? 'selected' : ''}>PayPal payment (app asks for an email)</option>
+      </select></label>
       <label class="switch-label field-wide"><input name="is_active" type="checkbox" ${item?.is_active ? 'checked' : ''} /><span><strong>Listed for exchange</strong><small>Unlisted items stay in the catalog but users cannot redeem them.</small></span></label>
       <div class="form-actions field-wide">
         <button type="submit">${isEditing ? 'Save reward' : 'Create reward'}</button>
@@ -1885,6 +1904,7 @@ function catalogFormInput(form: HTMLFormElement): CatalogFormFields {
     ...(text('image_url') ? { image_url: text('image_url') } : {}),
     ...(text('seagm_url') ? { seagm_url: text('seagm_url') } : {}),
     ...(text('stock_note') ? { stock_note: text('stock_note') } : {}),
+    recipient_type: text('recipient_type') === 'paypal_email' ? 'paypal_email' : 'none',
     is_active: values.get('is_active') === 'on',
   };
 }
@@ -2104,6 +2124,7 @@ function renderRedemptionDetail(detail: RedemptionDetail): void {
           <dt>User</dt><dd>${escapeHtml(detail.user.email ?? detail.user.id)}<small>${escapeHtml(detail.user.id)}</small></dd>
           <dt>Reward</dt><dd>${escapeHtml(detail.redemption.reward.title)} · ${escapeHtml(detail.redemption.reward.face_value)}</dd>
           <dt>SKU</dt><dd>${escapeHtml(detail.redemption.reward.sku)}</dd>
+          ${detail.recipient_email ? `<dt>Send PayPal to</dt><dd><code>${escapeHtml(detail.recipient_email)}</code></dd>` : ''}
           <dt>Coin charged</dt><dd>${integer(detail.redemption.coin_price)}</dd>
           <dt>Estimated cost</dt><dd>${money(Number(detail.redemption.usd_cost_est))}</dd>
           <dt>Region</dt><dd>${escapeHtml(detail.user.region_id)} / ${escapeHtml(detail.user.country_code)}</dd>
@@ -2131,7 +2152,7 @@ function renderRedemptionDetail(detail: RedemptionDetail): void {
       </ul>
     </article>
     ${canApprove || canStartFulfillment ? `<dialog id="redemptionActionDialog" aria-labelledby="redemptionActionTitle"><div class="form-stack"><div><p class="eyebrow">Confirm action</p><h3 id="redemptionActionTitle"></h3><p id="redemptionActionMessage" class="muted"></p></div><div class="form-actions"><button id="confirmRedemptionAction" type="button"></button><button id="cancelRedemptionAction" class="secondary" type="button">Cancel</button></div></div></dialog>` : ''}
-    ${canDeliver ? `<dialog id="deliveryDialog"><form id="deliveryCodeForm" class="form-stack"><div><p class="eyebrow">Complete fulfillment</p><h3>Deliver ${escapeHtml(detail.redemption.reward.title)}</h3><p class="muted">${escapeHtml(detail.user.email ?? detail.user.id)} · ${escapeHtml(detail.redemption.reward.face_value)}</p></div><label>Delivery code<textarea name="delivery_code" rows="4" minlength="1" maxlength="4000" autocomplete="off" required></textarea></label><label>Delivery note<textarea name="note" rows="2" maxlength="2000" placeholder="Optional instructions for the user"></textarea></label><div class="form-actions"><button type="submit">Deliver reward</button><button id="cancelDelivery" class="secondary" type="button">Cancel</button></div></form></dialog>` : ''}
+    ${canDeliver ? `<dialog id="deliveryDialog"><form id="deliveryCodeForm" class="form-stack"><div><p class="eyebrow">Complete fulfillment</p><h3>Deliver ${escapeHtml(detail.redemption.reward.title)}</h3><p class="muted">${escapeHtml(detail.user.email ?? detail.user.id)} · ${escapeHtml(detail.redemption.reward.face_value)}</p></div><label>${detail.recipient_email ? 'PayPal transaction ID' : 'Delivery code'}<textarea name="delivery_code" rows="4" minlength="1" maxlength="4000" autocomplete="off" required></textarea></label><label>Delivery note<textarea name="note" rows="2" maxlength="2000" placeholder="Optional instructions for the user"></textarea></label><div class="form-actions"><button type="submit">Deliver reward</button><button id="cancelDelivery" class="secondary" type="button">Cancel</button></div></form></dialog>` : ''}
   `;
   const actionDialog = target.querySelector<HTMLDialogElement>('#redemptionActionDialog');
   const actionTitle = target.querySelector<HTMLElement>('#redemptionActionTitle');
@@ -2319,7 +2340,7 @@ function rewardedAdsSection(data?: RewardedAdsSettingsData): string {
 function spinSection(data?: SpinConfigsData): string {
   return `<section class="settings-section">
       <div class="settings-section-heading">
-        <div><p class="eyebrow">Lucky spin</p><h3>Paid spins per day</h3></div>
+        <div><p class="eyebrow">Lucky spin</p><h3>Spin tables</h3></div>
       </div>
       <div class="redemption-settings-grid">
         ${(data?.items ?? [])
@@ -2351,6 +2372,7 @@ function spinSection(data?: SpinConfigsData): string {
               </div>
               <p class="muted">Used by — ${escapeHtml(usageLabel)}. The free spin stays one per day and ignores this cap.</p>
               ${paidRegions.length === 0 ? '<div class="config-warning">No region uses this table for paid spins, so this cap has no effect today.</div>' : ''}
+              ${renderPrizeEditor(config)}
               <div class="form-actions">
                 <button type="submit">Save table</button>
                 <span class="muted">Updated ${formatDate(config.updated_at)}</span>
@@ -2465,6 +2487,13 @@ function renderSettings(
           Google first-login bonus
           <input name="google_login" type="number" min="0" max="10000000" step="1" value="${String(settings?.google_login ?? 0)}" required />
         </label>
+        <label>
+          Guest welcome bonus
+          <select name="welcome_mode">
+            <option value="instant" ${settings?.welcome_mode === 'link_required' ? '' : 'selected'}>Paid on signup</option>
+            <option value="link_required" ${settings?.welcome_mode === 'link_required' ? 'selected' : ''}>Held until the guest links an account</option>
+          </select>
+        </label>
       </div>
       <div class="login-offer-preview">
         <div>
@@ -2538,6 +2567,8 @@ function renderSettings(
           updateCoinRewardSettings({
             welcome_coin: Number(form.get('welcome_coin')),
             google_login: Number(form.get('google_login')),
+            welcome_mode:
+              form.get('welcome_mode') === 'link_required' ? 'link_required' : 'instant',
           }),
         (coinRewardSettings) => ({ coinRewardSettings }),
       );
@@ -2629,19 +2660,30 @@ function renderSettings(
   });
 
   document.querySelectorAll<HTMLFormElement>('[data-spin-config]').forEach((form) => {
+    wirePrizeEditor(form);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       const configId = form.dataset['spinConfig'];
       if (!configId || !spinConfigs) return;
       const values = new FormData(form);
+      const prizes = readPrizes(configId);
       void runAction(
-        () => updateSpinConfig(configId, { daily_cap: Number(values.get('daily_cap')) }),
-        (updated) => ({
-          spinConfigs: {
-            ...spinConfigs,
-            items: spinConfigs.items.map((config) => (config.id === updated.id ? updated : config)),
-          },
-        }),
+        () =>
+          updateSpinConfig(configId, {
+            daily_cap: Number(values.get('daily_cap')),
+            ...(prizes ? { prizes } : {}),
+          }),
+        (updated) => {
+          clearPrizeDrafts(updated.id);
+          return {
+            spinConfigs: {
+              ...spinConfigs,
+              items: spinConfigs.items.map((config) =>
+                config.id === updated.id ? updated : config,
+              ),
+            },
+          };
+        },
       );
     });
   });
@@ -2653,6 +2695,14 @@ const novelsHost: NovelsHost = {
   wireShell,
   setStatus: (next) => setState(next),
   isActive: () => state.page === 'novels' && state.session !== null,
+  role: () => state.session?.role,
+};
+
+const feedbackHost: FeedbackHost = {
+  root: appRoot,
+  shell,
+  wireShell,
+  setStatus: (next) => setState(next),
   role: () => state.session?.role,
 };
 
@@ -2689,6 +2739,7 @@ async function loadPage(page: Page): Promise<void> {
       setState({ redemptions: await listRedemptions({}), loading: false });
     }
     if (page === 'settings') {
+      clearPrizeDrafts();
       const [
         coinRewardSettings,
         redemptionSettings,
@@ -2712,6 +2763,7 @@ async function loadPage(page: Page): Promise<void> {
       });
     }
     if (page === 'novels') await loadNovelsPage(novelsHost);
+    if (page === 'feedback') await loadFeedbackPage(feedbackHost);
     if (page === 'audit') setState({ audit: await listAuditLog({}), loading: false });
   } catch (error) {
     setState({ error: errorMessage(error), loading: false });
@@ -2739,6 +2791,7 @@ function render(): void {
       state.novelSettings ?? undefined,
     );
   if (state.page === 'novels') renderNovelsPage(novelsHost);
+  if (state.page === 'feedback') renderFeedbackPage(feedbackHost);
   if (state.page === 'audit') renderAudit(state.audit ?? undefined);
 }
 

@@ -9,6 +9,7 @@ import { recomputeScoreInTx } from '../fraud/score.service.js';
 import { assignReferralCode } from './referral-code.js';
 import { getReferralFeature } from './region-feature.js';
 import type { ReferralStatsResponse } from './schemas.js';
+import { shareUrl } from '../../lib/share-url.js';
 
 const REDEEM_WINDOW_MS = 72 * 60 * 60 * 1000; // 11-REFERRAL.md §2: 72h onboarding window
 const IP_CLUSTER_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // RF02: 7-day window
@@ -285,16 +286,5 @@ export async function getReferralStats(userId: string): Promise<ReferralStatsRes
 // Undefined when REFERRAL_SHARE_BASE_URL is unset or invalid — see the schema's note on why an
 // absent field beats a broken link.
 function referralShareUrl(code: string): string | undefined {
-  const base = env.REFERRAL_SHARE_BASE_URL;
-  if (!base) return undefined;
-  try {
-    const url = new URL(base);
-    if (url.protocol !== 'https:' || url.username || url.password) return undefined;
-    url.pathname = `${url.pathname.replace(/\/+$/, '')}/${encodeURIComponent(code)}`;
-    url.search = '';
-    url.hash = '';
-    return url.toString();
-  } catch {
-    return undefined;
-  }
+  return shareUrl(env.REFERRAL_SHARE_BASE_URL, code);
 }

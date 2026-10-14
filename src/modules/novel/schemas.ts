@@ -29,6 +29,8 @@ export const ListNovelsQuerySchema = Type.Object({
   completion_status: Type.Optional(
     Type.Union([Type.Literal('ongoing'), Type.Literal('completed'), Type.Literal('hiatus')]),
   ),
+  // Original language of the text, e.g. "vi", "en".
+  language: Type.Optional(Type.String({ minLength: 2, maxLength: 10 })),
   sort: Type.Optional(NovelSortSchema),
   cursor: Type.Optional(Type.String({ pattern: '^[0-9]{1,6}$' })),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
@@ -55,22 +57,35 @@ export const NovelSummarySchema = Type.Object({
   chapter_count: Type.Integer(),
   word_count: Type.Integer(),
   updated_at: Type.String(),
+  // Original language of the text (ISO 639-1, e.g. "vi", "en").
+  language: Type.String(),
+  // Editor-entered 0–5 score; null when not rated (hide the stars).
+  rating: Type.Union([Type.Number(), Type.Null()]),
+  // Distinct readers who have opened a chapter.
+  read_count: Type.Integer(),
+  ai_generated: Type.Boolean(),
+  editor_reviewed: Type.Boolean(),
 });
 export type NovelSummary = Static<typeof NovelSummarySchema>;
 
 export const NovelListResponseSchema = Type.Object({
   items: Type.Array(NovelSummarySchema),
   next_cursor: Nullable(Type.String()),
+  // Every novel matching the filters, across all pages.
+  total: Type.Integer(),
 });
 
 export const HomeResponseSchema = Type.Object({
   featured: Type.Array(NovelSummarySchema),
   latest: Type.Array(NovelSummarySchema),
   popular: Type.Array(NovelSummarySchema),
+  // Novels in the reader's preferred genres they have not opened yet; falls back to popular.
+  for_you: Type.Array(NovelSummarySchema),
   continue_reading: Type.Array(
     Type.Object({
       novel: NovelSummarySchema,
       last_chapter_no: Type.Union([Type.Integer(), Type.Null()]),
+      last_chapter_title: Nullable(Type.String()),
       last_read_at: Nullable(Type.String()),
     }),
   ),
@@ -87,10 +102,11 @@ export const NovelDetailSchema = Type.Composite([
   Type.Object({
     alt_titles: Type.Array(Type.String()),
     translator: Nullable(Type.String()),
-    language: Type.String(),
     vip_from_chapter: Type.Union([Type.Integer(), Type.Null()]),
     default_unlock_coin: Type.Integer(),
     allow_ad_unlock: Type.Boolean(),
+    // Absent when NOVEL_SHARE_BASE_URL is not configured; the app then shares the title alone.
+    share_url: Type.Optional(Type.String()),
     library: LibraryStateSchema,
   }),
 ]);
@@ -155,6 +171,8 @@ export const ReadHeartbeatResponseSchema = Type.Object({
   required_seconds: Type.Integer(),
   scroll_ratio: Type.Number(),
   reward_eligible: Type.Boolean(),
+  // 1 normally; >1 while a lucky-spin boost runs, in which case the chapter reward is multiplied.
+  boost_multiplier: Type.Integer(),
   // True on exactly one beat: the one that credited. The app fires its reward animation off this.
   rewarded: Type.Boolean(),
   credited_coin: Type.Integer(),
@@ -180,6 +198,28 @@ export const UnlockResponseSchema = Type.Object({
 });
 export type UnlockResponse = Static<typeof UnlockResponseSchema>;
 
+const UuidSchema = Type.String({ format: 'uuid' });
+
+export const PreferencesBodySchema = Type.Object({
+  category_ids: Type.Array(UuidSchema, { maxItems: 5 }),
+});
+export type PreferencesBody = Static<typeof PreferencesBodySchema>;
+
+export const PreferencesResponseSchema = Type.Object({
+  category_ids: Type.Array(Type.String()),
+});
+export type PreferencesResponse = Static<typeof PreferencesResponseSchema>;
+
+export const ReadingStatsResponseSchema = Type.Object({
+  // Chapters read to the end (the same completion that earns the chapter reward).
+  chapters_read: Type.Integer(),
+  // Server-measured reading time, summed over every chapter.
+  reading_seconds: Type.Integer(),
+  // Consecutive days of check-in, as days_claimed in GET /checkin/state.
+  checkin_streak: Type.Integer(),
+});
+export type ReadingStatsResponse = Static<typeof ReadingStatsResponseSchema>;
+
 export const LibraryQuerySchema = Type.Object({
   view: Type.Optional(Type.Union([Type.Literal('bookshelf'), Type.Literal('history')])),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
@@ -192,6 +232,7 @@ export const LibraryResponseSchema = Type.Object({
       novel: NovelSummarySchema,
       in_bookshelf: Type.Boolean(),
       last_chapter_no: Type.Union([Type.Integer(), Type.Null()]),
+      last_chapter_title: Nullable(Type.String()),
       last_read_at: Nullable(Type.String()),
     }),
   ),

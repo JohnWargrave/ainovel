@@ -917,6 +917,45 @@ describe('rewarded video SSV (AdMob)', () => {
         .execute();
       expect(ledger).toHaveLength(0);
     });
+
+    it('never pays eCPM coin for a checkin ad — POST /checkin/double pays it instead', async () => {
+      const regionId = await createPlacementRegion({
+        checkin: { daily_cap: 5, cooldown_s: 0, coin_multiplier: 1 },
+      });
+      const userId = await createTestUser({ region_id: regionId });
+      const intent = await intentRequest(userId, 'checkin');
+      expect(intent.statusCode).toBe(200);
+      const { intent_id: intentId } = intent.json<IntentResponseBody>();
+
+      const callback = await app.inject({
+        method: 'GET',
+        url: buildSsvUrl({
+          ad_network: '5450213213286189855',
+          ad_unit: '1234',
+          reward_amount: '1',
+          reward_item: 'coin',
+          timestamp: String(Date.now()),
+          transaction_id: randomUUID().replace(/-/g, ''),
+          custom_data: intentId,
+          key_id: String(KEY_ID),
+        }),
+      });
+      expect(callback.statusCode).toBe(200);
+
+      const consumed = await db
+        .selectFrom('rewarded_ad_intents')
+        .selectAll()
+        .where('id', '=', intentId)
+        .executeTakeFirstOrThrow();
+      expect(consumed.status).toBe('consumed');
+      expect(Number(consumed.coin_awarded)).toBe(0);
+      const ledger = await db
+        .selectFrom('coin_ledger')
+        .select('id')
+        .where('user_id', '=', userId)
+        .execute();
+      expect(ledger).toHaveLength(0);
+    });
   });
 
   describe('verifier key store', () => {

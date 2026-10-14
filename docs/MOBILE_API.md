@@ -20,6 +20,7 @@ Mọi field, mã lỗi và giới hạn trong tài liệu được lấy từ co
 11. [Vòng quay (Spin)](#11-vòng-quay-spin)
 12. [Giới thiệu bạn bè (Referral)](#12-giới-thiệu-bạn-bè-referral)
 13. [Đổi quà (Catalog & Redemption)](#13-đổi-quà-catalog--redemption)
+14. [Phản hồi & báo cáo](#14-phản-hồi--báo-cáo)
 
 ## 0. Quy ước chung
 
@@ -158,6 +159,7 @@ Response 200:
       "credit_immediately": false
     }
   },
+  "welcome": { "mode": "instant", "coin": 10000 },
   "coin_per_usd": 10000,
   "min_supported_app_version": "1.0.0",
   "min_redemption_usd": 5
@@ -173,6 +175,7 @@ Ghi chú:
 - Mỗi object trong `features` là free-form (`Record<string, unknown>`); các key ở trên là các key server hiện đang build. Khi tính năng tắt, `spin` chỉ còn `{ "enabled": false }`. Các giá trị khác khi chưa cấu hình sẽ về `false`/`0`/`[]`.
 - `novel.*` và `rewarded_ads.placements` chỉ để hiển thị; việc cộng coin luôn do server quyết định. Placement hợp lệ: `checkin`, `earncoin`, `luckyspin`, `chapter_unlock` (chỉ có key nào đã được cấu hình).
 - `offerwall.share_pct`: phần trăm (0-100) cho trust level 0. `referral.pct` là tỉ lệ thập phân (vd 0.10 = 10%), khác với `share_pct`. `checkin.rewards`: mảng coin theo ngày check-in. `offerwall.networks`, `checkin.rewards` được trả nguyên từ DB.
+- `welcome`: coin chào mừng (cấu hình chung, không theo region). `mode` = `welcome_mode` của `GET /auth/login-offers`: `instant` → màn welcome "Bạn nhận N coin"; `link_required` → màn welcome pending "Liên kết tài khoản để nhận N coin". Khi admin đổi trong CMS, cache server bị xoá ngay; app thấy giá trị mới ở lần gọi `/config` kế tiếp (HTTP cache của chính app vẫn có thể giữ tối đa 60s).
 - `coin_per_usd` cố định 10000. `min_supported_app_version`: client tự so với version của mình để ép cập nhật.
 
 Lỗi:
@@ -200,6 +203,7 @@ Object `user` trả về trong các response đăng nhập/đăng ký (`AuthResu
   "refresh": "eyJhbGciOiJIUzI1NiIs...",
   "user": {
     "id": "0192f3a4-7c1e-7b3a-9d2e-4f5a6b7c8d9e",
+    "public_id": "10284731",
     "auth_provider": "guest",
     "trust_level": 0,
     "region_id": "VN",
@@ -211,6 +215,7 @@ Object `user` trả về trong các response đăng nhập/đăng ký (`AuthResu
 ```
 
 - `auth_provider`: `guest` | `google` | `facebook` | `password` (phương thức đăng nhập "chính" hiện tại).
+- `public_id`: ID số để hiển thị ở màn hồ sơ ("ID 10284731") và đọc cho bộ phận hỗ trợ; **string** (bigint), ≥ 8 chữ số, không đổi suốt đời tài khoản. Chỉ để hiển thị — mọi API vẫn dùng `id` (UUID).
 - `country_code`: mã ISO quốc gia theo IP lúc tạo tài khoản (`"XX"` nếu không xác định).
 - `referral_code`: mã giới thiệu của chính user (có thể `null` với tài khoản cũ).
 - Các route này không khai báo response schema nên có thể có thêm field (vd `recovered`). Response KHÔNG chứa số dư ví — gọi `GET /me` để lấy.
@@ -239,10 +244,14 @@ Response 200:
       "total_coin": 1500
     }
   ],
+  "welcome_mode": "instant",
   "updated_at": "2026-10-01T00:00:00.000Z"
 }
 ```
 
+- `welcome_mode` (CMS cấu hình):
+  - `instant`: mọi tài khoản mới, kể cả guest, nhận `welcome_coin` ngay khi tạo. App hiện màn "Welcome gift".
+  - `link_required`: guest **chưa** nhận `welcome_coin`; coin được cộng khi guest liên kết Google/Facebook (`POST /auth/bind`) hoặc thêm mật khẩu (`POST /auth/password/bind`). App hiện màn "Welcome gift — Pending" với nút "Link Google & claim". Tài khoản tạo thẳng bằng Google/Facebook/mật khẩu vẫn nhận ngay.
 - Coin là integer. Chỉ có 2 item `password` và `google` (không có `facebook`/`guest`; thực tế guest và facebook cũng nhận `welcome_coin`, chỉ Google có `provider_bonus_coin`).
 
 Lỗi:
@@ -269,7 +278,7 @@ Response 200: `AuthResult` (xem trên). Khi khôi phục tài khoản guest có 
 
 Side effects:
 
-- Tài khoản mới: tạo user + ví + device, nhận `welcome_coin` (một lần duy nhất mỗi user), `trust_level` = 0, sinh `referral_code`.
+- Tài khoản mới: tạo user + ví + device, nhận `welcome_coin` (một lần duy nhất mỗi user; khi `welcome_mode = link_required` thì chưa nhận, xem `GET /auth/login-offers`), `trust_level` = 0, sinh `referral_code`.
 - Khôi phục: tìm theo installation id (fallback một lần theo fingerprint GAID+model+os+build_props cho tài khoản cũ), cấp session mới; nếu user chưa từng nhận welcome bonus thì được cộng bù.
 
 Rate limit: 20 req/60s/IP. Khôi phục: 5 lần/giờ/installation. Tạo tài khoản mới: 60/giờ/mạng (/24 IPv4 hoặc /64 IPv6) và 3/24h/GAID.
@@ -686,25 +695,75 @@ Response 200:
 ```json
 {
   "id": "0192f3a4-7c1e-7b3a-9d2e-4f5a6b7c8d9e",
+  "public_id": "10284731",
   "username": "Player_7c8d9e",
   "avatar_url": null,
   "auth_provider": "guest",
   "trust_level": 0,
   "region_id": "VN",
   "referral_code": "K7Q2MX",
-  "wallet": { "available_coin": "1000", "pending_coin": "0" }
+  "wallet": { "available_coin": "1000", "pending_coin": "0" },
+  "active_boost": { "multiplier": 2, "expires_at": "2026-10-14T09:30:00.000Z" },
+  "welcome": { "coin": 10000, "claimed": true, "mode": "instant" }
 }
 ```
 
 - `username`: username mật khẩu (lowercase) nếu có; nếu không là tên hiển thị suy ra từ id: `Player_` + 6 ký tự hex cuối của id.
 - `avatar_url`: hiện luôn `null`.
+- `public_id`: như trong response đăng nhập.
 - `wallet.available_coin` / `pending_coin`: **string** (bigint), parse bằng số nguyên lớn. `pending_coin` là coin đang chờ xác nhận, chưa dùng được.
+- `welcome`: coin chào mừng. `claimed`: tài khoản đã nhận chưa; `coin`: số đã nhận (hoặc số sẽ nhận nếu chưa); `mode`: như `welcome_mode` ở `GET /auth/login-offers`. Khi `!claimed && mode = "link_required"` → hiện banner "Link Google to claim".
+- `active_boost`: boost thưởng đọc đang chạy (giải "×2 boost" của Lucky Spin), hoặc `null`. Trong khoảng này, thưởng đọc chương được nhân `multiplier`.
 
 Lỗi:
 
 - `400 VALIDATION_ERROR` — thiếu header.
 - `401 UNAUTHORIZED` / `INVALID_ACCESS_TOKEN` / `SESSION_REVOKED`.
 - `404 USER_NOT_FOUND`.
+
+### `GET /me/stats`
+
+Ba chỉ số ở màn hồ sơ. **Auth:** Bearer.
+
+Response 200:
+
+```json
+{ "chapters_read": 48, "reading_seconds": 43200, "checkin_streak": 4 }
+```
+
+- `chapters_read`: số chương đã đọc hết (cùng tiêu chí hoàn thành dùng để thưởng chương), tính trên mọi truyện, mọi thời điểm.
+- `reading_seconds`: tổng thời gian đọc do server đo qua heartbeat. App tự định dạng ("12h").
+- `checkin_streak`: số ngày điểm danh liên tiếp, bằng `days_claimed` của `GET /checkin/state`.
+
+Lỗi: chỉ các lỗi chung.
+
+### `GET /me/preferences` · `PUT /me/preferences`
+
+Thể loại yêu thích (màn chọn thể loại khi onboarding và trong cài đặt), dùng cho hàng `for_you` ở `GET /novels/home`. **Auth:** Bearer.
+
+`PUT` body — thay **toàn bộ** danh sách:
+
+```json
+{ "category_ids": ["0192f7a0-0000-7000-8000-000000000001", "0192f7a0-0000-7000-8000-000000000002"] }
+```
+
+| Field          | Kiểu     | Ràng buộc                                                                                   |
+| -------------- | -------- | ------------------------------------------------------------------------------------------- |
+| `category_ids` | string[] | 0–5 UUID, lấy từ `id` của `GET /novels/categories`. Trùng lặp được bỏ. Mảng rỗng = xoá hết. |
+
+Response 200 (cả `GET` lẫn `PUT`):
+
+```json
+{ "category_ids": ["0192f7a0-0000-7000-8000-000000000001"] }
+```
+
+- `GET` trả `[]` khi user chưa chọn. Thể loại đã bị ẩn sau khi chọn sẽ tự biến mất khỏi danh sách.
+
+Lỗi:
+
+- `400 VALIDATION_ERROR` — quá 5 phần tử hoặc không phải UUID.
+- `400 CATEGORY_NOT_FOUND` — có id không tồn tại hoặc thể loại đang ẩn. Không lưu gì.
+- `429 RATE_LIMITED` — quá 10 lần `PUT`/phút.
 
 ## 3. Hộp thư (Inbox)
 
@@ -836,11 +895,20 @@ Quy ước chung cho mọi endpoint trong mục 4:
   ],
   "chapter_count": 1648,
   "word_count": 5300000,
-  "updated_at": "2026-10-12T08:15:00.000Z"
+  "updated_at": "2026-10-12T08:15:00.000Z",
+  "language": "vi",
+  "rating": 4.8,
+  "read_count": 1200000,
+  "ai_generated": true,
+  "editor_reviewed": true
 }
 ```
 
 - `author`, `cover_url`, `description` có thể `null`.
+- `language`: ngôn ngữ gốc của truyện (ISO 639-1, ví dụ `vi`, `en`, `zh`).
+- `rating`: điểm 0–5 (1 chữ số thập phân) do biên tập viên nhập trong CMS; `null` = chưa chấm, ẩn sao.
+- `read_count`: số người đọc khác nhau đã mở ít nhất một chương (tăng khi user mở chương đầu tiên của truyện).
+- `ai_generated` / `editor_reviewed`: hiển thị nhãn "AI-generated · editor reviewed".
 - `completion_status`: `ongoing` | `completed` | `hiatus`.
 - `categories` chỉ gồm thể loại đang active, đã sắp theo `sort_order`.
 - `chapter_count`, `word_count` là số tổng do server tính; `updated_at` là ISO-8601 UTC.
@@ -860,10 +928,12 @@ Response `200`:
   "featured": [{ "...": "NovelSummary" }],
   "latest": [{ "...": "NovelSummary" }],
   "popular": [{ "...": "NovelSummary" }],
+  "for_you": [{ "...": "NovelSummary" }],
   "continue_reading": [
     {
       "novel": { "...": "NovelSummary" },
       "last_chapter_no": 57,
+      "last_chapter_title": "Chương 57: Tái ngộ",
       "last_read_at": "2026-10-13T14:02:11.000Z"
     }
   ]
@@ -873,7 +943,8 @@ Response `200`:
 - `featured`: tối đa 10, truyện được admin đánh dấu nổi bật, theo `featured_rank`.
 - `latest`: tối đa 10, theo `updated_at` giảm dần.
 - `popular`: tối đa 10, theo số người đọc khác nhau trong **7 ngày** gần nhất.
-- `continue_reading`: tối đa 5, những truyện user đã mở chương gần nhất (kể cả không nằm trong tủ sách). `last_chapter_no` là chương đã **mở** gần nhất (được ghi khi gọi `GET /novels/:id/chapters/:chapter_no`).
+- `for_you`: tối đa 10, truyện thuộc thể loại user đã chọn (`PUT /me/preferences`) mà user **chưa mở**, nhiều người đọc nhất trước. Khi user chưa chọn thể loại hoặc không còn truyện phù hợp, trả đúng danh sách `popular`.
+- `continue_reading`: tối đa 5, những truyện user đã mở chương gần nhất (kể cả không nằm trong tủ sách). `last_chapter_no` là chương đã **mở** gần nhất (được ghi khi gọi `GET /novels/:id/chapters/:chapter_no`). `last_chapter_title` là tiêu đề của chương đó (`null` nếu chương đã bị xoá).
 - Không phân trang.
 
 Lỗi: chỉ các lỗi chung.
@@ -892,6 +963,7 @@ Request (query):
 | `category`          | string                               | không    | ≤ 80 ký tự. **Slug** của thể loại (lấy từ `GET /novels/categories`).                                                                                           |
 | `tag`               | string                               | không    | ≤ 80 ký tự. Khớp chính xác một phần tử của `tags`.                                                                                                             |
 | `completion_status` | `ongoing` \| `completed` \| `hiatus` | không    |                                                                                                                                                                |
+| `language`          | string                               | không    | 2–10 ký tự. Ngôn ngữ gốc của truyện, khớp chính xác `language` trong `NovelSummary` (vd. `vi`, `en`).                                                          |
 | `sort`              | `updated` \| `new` \| `popular`      | không    | Mặc định `updated` (mới cập nhật). `new` = mới xuất bản; `popular` = nhiều người thêm vào tủ sách nhất.                                                        |
 | `cursor`            | string                               | không    | Chuỗi số 1–6 chữ số, lấy nguyên từ `next_cursor` của trang trước. Không gửi ở trang đầu.                                                                       |
 | `limit`             | integer                              | không    | 1–50, mặc định 20.                                                                                                                                             |
@@ -901,9 +973,12 @@ Response `200`:
 ```json
 {
   "items": [{ "...": "NovelSummary" }],
-  "next_cursor": "20"
+  "next_cursor": "20",
+  "total": 134
 }
 ```
+
+- `total`: tổng số truyện khớp bộ lọc trên **mọi** trang (dùng cho dòng "134 kết quả"); giống nhau ở mọi trang của cùng một truy vấn.
 
 - `next_cursor`: `null` khi hết dữ liệu. Thực chất là offset (không phải keyset) — app chỉ cần coi là chuỗi mờ và gửi lại y nguyên. Khi dữ liệu thay đổi giữa hai trang có thể bị trùng/sót một vài truyện.
 
@@ -962,12 +1037,17 @@ Response `200` (= `NovelSummary` + các field sau):
   "chapter_count": 1648,
   "word_count": 5300000,
   "updated_at": "2026-10-12T08:15:00.000Z",
+  "language": "vi",
+  "rating": 4.8,
+  "read_count": 1200000,
+  "ai_generated": false,
+  "editor_reviewed": false,
   "alt_titles": ["Battle Through the Heavens"],
   "translator": "Nhóm dịch ABC",
-  "language": "vi",
   "vip_from_chapter": 101,
   "default_unlock_coin": 50,
   "allow_ad_unlock": true,
+  "share_url": "https://ainovel.app/n/dau-pha-thuong-khung",
   "library": {
     "in_bookshelf": true,
     "last_chapter_no": 57,
@@ -979,6 +1059,7 @@ Response `200` (= `NovelSummary` + các field sau):
 - `vip_from_chapter`: từ chương số này trở đi mặc định là VIP; `null` = không có VIP mặc định. **Lưu ý:** từng chương có thể bị admin ghi đè VIP/không VIP và giá riêng → luôn dựa vào `is_vip` / `unlock_price` trong mục lục, không tự suy ra từ field này.
 - `default_unlock_coin`: giá mở khoá mặc định (coin) cho chương VIP không có giá riêng.
 - `allow_ad_unlock`: truyện có cho mở chương VIP bằng quảng cáo hay không.
+- `share_url`: link chia sẻ truyện. **Có thể không có** (field bị bỏ hẳn chứ không phải `null`) khi server chưa cấu hình base URL — khi đó app chia sẻ tiêu đề truyện.
 - `library`: `in_bookshelf=false`, `last_*=null` nếu user chưa từng tương tác.
 
 Lỗi:
@@ -1103,14 +1184,30 @@ Lỗi:
       "message": "This chapter must be unlocked first",
       "chapter_id": "0192f7b1-aaaa-7bbb-8ccc-000000000065",
       "unlock_price": 50,
-      "ad_unlock": true
+      "ad_unlock": true,
+      "preview": {
+        "title": "Chương 101: Cửa ải",
+        "text": "Đoạn mở đầu thứ nhất…\n\nĐoạn thứ hai…"
+      }
     }
   }
   ```
 
   `chapter_id` dùng ngay cho `POST /novels/chapters/:id/unlock`; `unlock_price` là giá coin; `ad_unlock` = truyện có cho mở bằng quảng cáo không.
+  `preview`: phần mở đầu để hiển thị phía trên popup mở khoá — tiêu đề chương và 2 đoạn đầu (cách nhau bằng `\n\n`), tối đa 800 ký tự; nếu bị cắt thì cắt ở ranh giới từ và kết thúc bằng `…`. Chỉ có ở endpoint này; `CHAPTER_LOCKED` từ heartbeat/unlock không kèm `preview`.
 
-- `429 RATE_LIMITED` — vượt 20 chương/phút hoặc 300 chương/giờ.
+- `429 RATE_LIMITED` — vượt 20 chương/phút (chờ vài giây rồi thử lại).
+- `429 CHAPTER_HOURLY_LIMIT` — vượt 300 chương/giờ. Body có thêm `retry_at` (ISO 8601) — thời điểm được đọc tiếp, dùng cho màn "đọc quá nhanh" với đồng hồ đếm ngược:
+
+  ```json
+  {
+    "error": {
+      "code": "CHAPTER_HOURLY_LIMIT",
+      "message": "…",
+      "retry_at": "2026-10-14T09:20:00.000Z"
+    }
+  }
+  ```
 
 ---
 
@@ -1193,6 +1290,7 @@ Response `200`:
   "required_seconds": 312,
   "scroll_ratio": 0.42,
   "reward_eligible": true,
+  "boost_multiplier": 1,
   "rewarded": false,
   "credited_coin": 0,
   "new_balance": "1250",
@@ -1204,6 +1302,7 @@ Response `200`:
 - `required_seconds`: ngưỡng thời gian cần đạt (cùng công thức với `reward.required_seconds`).
 - `scroll_ratio`: max scroll server đã ghi nhận.
 - `reward_eligible`: chương có thể trả thưởng không (`false` với VIP hoặc khi region tắt thưởng).
+- `boost_multiplier`: `1` bình thường; `> 1` khi user đang có boost (xem `active_boost` ở `GET /me`). Thưởng chương = `chapter_reward_coin × boost_multiplier`, tính tại nhịp trả thưởng.
 - `rewarded`: `true` **đúng một lần** — ở nhịp vừa cộng coin. App dùng field này để chạy animation thưởng. Các nhịp sau trên cùng chương trả `false`.
 - `credited_coin`: số coin cộng ở nhịp này (0 nếu không cộng).
 - `new_balance`: số dư `available` hiện tại (string), có ở mọi nhịp.
@@ -1251,6 +1350,7 @@ Response `200`:
       "novel": { "...": "NovelSummary" },
       "in_bookshelf": true,
       "last_chapter_no": 57,
+      "last_chapter_title": "Chương 57: Tái ngộ",
       "last_read_at": "2026-10-13T14:02:11.000Z"
     }
   ]
@@ -1258,6 +1358,7 @@ Response `200`:
 ```
 
 - Không phân trang (không có cursor) — chỉ trả tối đa `limit` bản ghi.
+- `last_chapter_title`: tiêu đề chương mở gần nhất, `null` nếu chưa mở chương nào hoặc chương đã bị xoá.
 - Truyện không còn hiển thị với vùng của user bị loại khỏi danh sách.
 
 Lỗi: chỉ các lỗi chung.
@@ -1330,7 +1431,7 @@ Quy ước chung:
 | `placement`      | Mục đích                   | Phần thưởng                                                             |
 | ---------------- | -------------------------- | ----------------------------------------------------------------------- |
 | `earncoin`       | Xem ad nhận coin           | Coin được cộng server-side khi SSV về                                   |
-| `checkin`        | Ad ở màn điểm danh         | Coin được cộng server-side khi SSV về                                   |
+| `checkin`        | Ad x2 điểm danh            | SSV **không** cộng coin; intent được dùng ở `POST /checkin/double`      |
 | `luckyspin`      | Ad để được quay vòng quay  | Intent được dùng ở API spin (`intent_id`) — ngoài phạm vi mục này       |
 | `chapter_unlock` | Ad mở khoá chương VIP      | Intent được dùng ở `POST /novels/chapters/:id/unlock` với `method="ad"` |
 | _(bỏ trống)_     | Build cũ chưa có placement | Dùng quota chung của region, cộng coin khi SSV về                       |
@@ -1492,11 +1593,13 @@ Response `200`:
 {
   "available_coin": "12500",
   "pending_coin": "3000",
-  "lifetime_earned": "48200"
+  "lifetime_earned": "48200",
+  "next_pending_release_at": "2026-10-16T03:21:09.000Z"
 }
 ```
 
-- Cả 3 field là **string**. Route này không khai báo response schema, nên server trả nguyên row DB (bigint ở dạng string).
+- 3 field coin là **string** (bigint).
+- `next_pending_release_at`: thời điểm sớm nhất một khoản đang chờ trở thành dùng được (dòng "available in 2 days" dưới số pending); `null` nếu không có khoản nào đang chờ có hạn. Khoản bị đóng băng chờ duyệt không được tính.
 - `lifetime_earned` là tổng mọi khoản đã cộng (cả available lẫn pending), không bị giảm khi tiêu coin.
 
 Lỗi:
@@ -1510,11 +1613,12 @@ Lịch sử biến động coin, mới nhất trước, phân trang bằng curso
 
 Query:
 
-| Tên        | Kiểu                       | Bắt buộc | Ràng buộc / ghi chú                                                                         |
-| ---------- | -------------------------- | -------- | ------------------------------------------------------------------------------------------- |
-| `limit`    | integer                    | không    | 1–100, mặc định 20                                                                          |
-| `cursor`   | string                     | không    | Lấy từ `next_cursor` của trang trước (là `id` của ledger entry, UUIDv7).                    |
-| `provider` | `"tapjoy"` \| `"pubscale"` | không    | Chỉ lấy các entry gắn với earning event của network này (dùng cho màn "Lịch sử offerwall"). |
+| Tên        | Kiểu                                                                   | Bắt buộc | Ràng buộc / ghi chú                                                                                                |
+| ---------- | ---------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `limit`    | integer                                                                | không    | 1–100, mặc định 20                                                                                                 |
+| `cursor`   | string                                                                 | không    | Lấy từ `next_cursor` của trang trước (là `id` của ledger entry, UUIDv7).                                           |
+| `provider` | `"tapjoy"` \| `"pubscale"` \| `"adgate"` \| `"adjoe"` \| `"appsprize"` | không    | Chỉ lấy các entry gắn với earning event của network này (dùng cho màn "Lịch sử offerwall").                        |
+| `bucket`   | `"pending"`                                                            | không    | Chỉ lấy coin **đang chờ** (tab "Pending"), mọi nguồn: offerwall, giới thiệu… Entry đã release không còn xuất hiện. |
 
 Response `200`:
 
@@ -1530,6 +1634,7 @@ Response `200`:
       "balance_after": "12500",
       "note": null,
       "created_at": "2026-10-14T03:21:09.000Z",
+      "available_at": "2026-10-17T03:21:09.000Z",
       "offerwall": {
         "provider": "tapjoy",
         "provider_label": "Tapjoy",
@@ -1547,6 +1652,7 @@ Response `200`:
       "balance_after": "12500",
       "note": "Daily check-in day 3",
       "created_at": "2026-10-14T01:00:00.000Z",
+      "available_at": null,
       "offerwall": null
     }
   ],
@@ -1559,6 +1665,7 @@ Ghi chú:
 - `amount` là **string có dấu**: khoản cộng thì dương, khoản trừ (`*_DEBIT`, `*_CLAWBACK`, dòng HOLD_RELEASE phía pending) thì **âm**, ví dụ `"-5000"`.
 - `balance_after` luôn là số dư **available** sau entry, kể cả khi entry thuộc bucket `pending`. Vì vậy với entry pending, `balance_after` không đổi so với entry trước.
 - `bucket`: `"available"` hoặc `"pending"`.
+- `available_at`: với mọi entry **đang chờ** (offerwall, giới thiệu…), thời điểm dự kiến coin dùng được; `null` khi đã dùng được, đã release, hoặc đang bị đóng băng chờ duyệt (khi đó app hiện "Đang xét duyệt").
 - `entry_label` là nhãn tiếng Anh do server sinh ra. Client mới nên hiển thị field này thay vì tự map `entry_type`. Loại không biết sẽ có nhãn `"Coin activity"`.
 - `offerwall` chỉ khác `null` với `OFFERWALL_CREDIT` / `OFFERWALL_CLAWBACK`:
   - `status`: `"reversed"` (clawback), `"pending"` (đang hold, khi đó `available_at` = thời điểm dự kiến release), `"available"` (đã release hoặc được cộng thẳng). Sau khi hold được release, entry gốc chuyển sang `status: "available"`, còn `bucket` của entry gốc **vẫn là `"pending"`** vì ledger là append-only.
@@ -1590,6 +1697,7 @@ Các `entry_type` client có thể gặp (kèm `entry_label`):
 | `DIRECT_CREDIT`          | Coin reward            | +   | `POST /earning/coin`                                                                  |
 | `NOVEL_READ_CREDIT`      | Chapter reading reward | +   |                                                                                       |
 | `CHAPTER_UNLOCK_DEBIT`   | Chapter unlock         | −   |                                                                                       |
+| `CHECKIN_BONUS_CREDIT`   | Check-in bonus         | +   | `POST /checkin/double`                                                                |
 
 Lỗi:
 
@@ -1601,7 +1709,7 @@ Lỗi:
 
 Ngày được tính theo timezone của **region của user** (`users.region_id`, không phụ thuộc IP hay VPN). Reset vào 00:00 giờ địa phương của region (`reset_at`, biểu diễn bằng UTC). Bảng thưởng `rewards[]` đánh số theo ngày 1..N và lặp lại sau ngày cuối. Bỏ lỡ một ngày thì streak quay về ngày 1.
 
-> Không có cơ chế "x2 bằng quảng cáo" trong các endpoint check-in. `POST /checkin/claim` không nhận `intent_id`. Placement rewarded-ad `checkin` (tạo qua `POST /earning/rewarded-ad/intent`, xem mục Rewarded Ads) được trả coin **riêng** bởi AdMob SSV callback, ghi thành `REWARDED_AD_CREDIT`, và không liên kết với lần claim check-in.
+> **x2 bằng quảng cáo:** sau khi claim, app có thể cho xem rewarded ad placement `checkin` rồi gọi `POST /checkin/double` để nhận thêm đúng bằng thưởng điểm danh hôm nay. SSV callback của placement `checkin` không tự cộng coin.
 
 ### `GET /checkin/state`
 
@@ -1619,7 +1727,9 @@ Response `200`:
   "today_claimed": false,
   "rewards": [10, 15, 20, 25, 30, 40, 100],
   "next_reward_coin": 20,
-  "reset_at": "2026-10-14T17:00:00.000Z"
+  "reset_at": "2026-10-14T17:00:00.000Z",
+  "bonus_coin": 20,
+  "bonus_claimed_today": false
 }
 ```
 
@@ -1628,6 +1738,7 @@ Response `200`:
 - `days_claimed`: số ngày liên tiếp đã được cộng, không quay vòng. Account mới bằng 0.
 - `next_reward_coin`: số coin của lần claim kế tiếp. Nếu hôm nay chưa claim thì đây là phần thưởng hôm nay, nếu đã claim thì là phần thưởng ngày mai (giả định streak không đứt).
 - `rewards[]`, `next_reward_coin`: kiểu number.
+- `bonus_coin`: số coin `POST /checkin/double` sẽ cộng (= thưởng điểm danh của hôm nay). `bonus_claimed_today`: hôm nay đã nhận x2 chưa. Hiện nút "Watch a video to double it" khi `today_claimed && !bonus_claimed_today`.
 
 Lỗi:
 
@@ -1664,9 +1775,51 @@ Lỗi:
 - `429 RATE_LIMITED`: vượt 10 lần/phút.
 - `429 UNBACKED_CAP_EXCEEDED` / `429 MINT_PAUSED`.
 
+### `POST /checkin/double`
+
+Nhận thưởng x2 điểm danh sau khi xem rewarded ad. Coin vào `available`, ghi thành `CHECKIN_BONUS_CREDIT`. **Auth:** Bearer. **Headers:** App headers. **Rate limit:** 10 request/60s/user.
+
+Luồng:
+
+1. `POST /checkin/claim` thành công (hoặc `today_claimed = true`).
+2. `POST /earning/rewarded-ad/intent { "placement": "checkin" }` → `intent_id`, `ssv_custom_data`.
+3. Show AdMob rewarded ad với `customData = ssv_custom_data`. Chờ `onUserEarnedReward`.
+4. `POST /checkin/double { "intent_id": "…" }`. Nếu `403 AD_NOT_VERIFIED` thì SSV chưa về: retry với backoff (1s, 2s, 4s…, tối đa ~30–60s).
+
+Body:
+
+```json
+{ "intent_id": "0192f7c3-1111-7222-8333-444455556666" }
+```
+
+Response `200`:
+
+```json
+{ "credited_coin": 20, "new_balance": "12540" }
+```
+
+Lỗi:
+
+- `400 VALIDATION_ERROR`: `intent_id` không phải UUID.
+- `401` lỗi auth.
+- `403 AD_NOT_VERIFIED`: intent không tồn tại, không thuộc user, chưa được SSV xác nhận (nên retry), sai placement (không phải `checkin`), hoặc đã dùng.
+- `403 EARNING_BLOCKED` / `403 EARNING_SUSPENDED`.
+- `404 FEATURE_DISABLED`: region tắt check-in.
+- `409 CHECKIN_NOT_CLAIMED`: hôm nay chưa claim điểm danh.
+- `409 ALREADY_CLAIMED`: hôm nay đã nhận x2 (intent không bị tiêu).
+- `429 RATE_LIMITED` / `429 MINT_PAUSED`.
+
 ## 8. Nhiệm vụ
 
-Danh sách nhiệm vụ lấy từ config region (`region_config.features.tasks`). Mỗi nhiệm vụ claim được **1 lần/ngày**, reset lúc 00:00 theo timezone của region. Claim là **tự khai báo**: client gửi "tôi đã làm" và server trả coin, không kiểm tra hành động thật. Nhiệm vụ loại `watch_ad` bị server lọc bỏ (ad đã được trả qua SSV).
+Danh sách nhiệm vụ lấy từ config region (`region_config.features.tasks`). Mỗi nhiệm vụ claim được **1 lần/ngày**, reset lúc 00:00 theo timezone của region. Có hai nhóm:
+
+- **Nhiệm vụ có tiến độ** (server tự đo, chỉ claim được khi `progress >= target`):
+  - `read_minutes`: số phút đọc hôm nay (thời gian đọc do server đo qua `POST /novels/read-heartbeat`); `target` là số phút.
+  - `finish_chapters`: số chương đã hoàn thành hôm nay (đủ thời gian + cuộn tới cuối, kể cả chương VIP đã mở).
+  - `watch_videos`: số rewarded ad đã được SSV xác nhận hôm nay, mọi placement.
+- **Nhiệm vụ một lần** (`invite_friend`, `share_app`, `daily_login`): claim là **tự khai báo**: client gửi "tôi đã làm" và server trả coin, không kiểm tra hành động thật.
+
+Nhiệm vụ loại `watch_ad` (một lần, tự khai báo) bị server lọc bỏ vì ad đã được trả qua SSV.
 
 ### `GET /earning/tasks`
 
@@ -1695,9 +1848,15 @@ Response `200`:
 }
 ```
 
-- `task_type`: `watch_ad` | `invite_friend` | `share_app` | `daily_login`. Trong thực tế không có `watch_ad` vì đã bị lọc.
-- `status`: `"available"` hoặc `"completed"`, tương ứng `completed_today`.
-- `progress` là 0 hoặc 1, `target` luôn là 1 (để dành cho nhiệm vụ nhiều bước sau này).
+- `task_type`: `invite_friend` | `share_app` | `daily_login` | `read_minutes` | `finish_chapters` | `watch_videos`. (`watch_ad` không bao giờ xuất hiện vì đã bị lọc.)
+- `status`:
+  - `"in_progress"`: nhiệm vụ có tiến độ chưa đạt `target`; nút claim bị khoá (UI hiện "Go"/"Watch").
+  - `"available"`: claim được.
+  - `"completed"`: đã claim hôm nay (= `completed_today`).
+- `progress` / `target`:
+  - Nhiệm vụ có tiến độ: `progress` là giá trị hôm nay, đã kẹp tối đa bằng `target`. Ví dụ "Read for 10 minutes" → `progress: 6, target: 10`.
+  - Nhiệm vụ một lần: `progress` là 0 hoặc 1, `target` = 1.
+  - Tiến độ không tự claim: app vẫn gọi `POST /earning/tasks/claim` khi `status = "available"`.
 - `icon_url`, `action` có thể `null`. Khi null, app dùng icon hoặc fallback có sẵn. `action` là deep link trong app (ví dụ `ainovel://spin`), không phải URL HTTP.
 - `reward_coin` là number.
 
@@ -1739,6 +1898,7 @@ Lỗi:
 - `403 EARNING_BLOCKED` / `403 EARNING_SUSPENDED`.
 - `404 FEATURE_DISABLED`: region chưa bật tasks.
 - `404 NOT_FOUND`: `task_id` không tồn tại, hoặc là task `watch_ad`.
+- `409 TASK_NOT_COMPLETE`: nhiệm vụ có tiến độ chưa đạt `target`.
 - `409 ALREADY_CLAIMED`: task đã hoàn thành hôm nay.
 - `429 RATE_LIMITED` / `429 UNBACKED_CAP_EXCEEDED` / `429 MINT_PAUSED`.
 
@@ -1824,6 +1984,7 @@ Response `200`:
       "description": "Install apps & play games to earn coins",
       "icon_url": "https://cdn.example.com/offerwall/tapjoy.png",
       "badge_text": "HOT",
+      "reward_text": "Up to $15",
       "placement": "Offerwall"
     }
   ],
@@ -1849,6 +2010,7 @@ Response `200`:
 - `enabled: false` thì `offers` và `networks` đều rỗng, nên ẩn offerwall.
 - `offers[]`: thẻ launch do CMS quản lý (đã lọc theo trạng thái active, region và khung thời gian). `id` là mã thẻ, `provider` là id network dùng để chọn SDK, `placement` là chuỗi truyền vào SDK của provider đó để mở offerwall.
 - `networks[]`: field tương thích ngược cho client cũ. `deeplink_url` **luôn `null`** (deprecated).
+- `reward_text`: dòng mức thưởng trên thẻ (vd "Up to $15"), CMS nhập tự do; `null` thì ẩn dòng này.
 - `icon_url`, `badge_text`, `placement` có thể `null`. Khi `null`, app dùng giá trị hoặc asset mặc định có sẵn trong app.
 
 Lỗi:
@@ -1858,12 +2020,14 @@ Lỗi:
 
 ## 11. Vòng quay (Spin)
 
-**Mọi lượt quay (cả paid lẫn free) đều phải xem rewarded ad trước.** Không trừ coin (`ticket_coin` luôn `"0"`). Luồng:
+**Lượt paid phải xem rewarded ad trước; lượt free mỗi ngày không cần quảng cáo.** Không trừ coin (`ticket_coin` luôn `"0"`). Luồng cho lượt paid:
 
 1. `POST /earning/rewarded-ad/intent` với `placement: "luckyspin"` để nhận `intent_id` (TTL 10 phút, xem mục Rewarded Ads).
 2. Hiển thị AdMob rewarded ad với `custom_data` = giá trị SSV do intent trả về.
 3. AdMob gọi SSV callback về server, intent chuyển sang `consumed`.
-4. Gọi `POST /spin` hoặc `POST /spin/free` với `intent_id`. Mỗi intent chỉ dùng được **1 lần**.
+4. Gọi `POST /spin` với `intent_id`. Mỗi intent chỉ dùng được **1 lần**.
+
+Lượt free: gọi thẳng `POST /spin/free` (không body).
 
 Nếu app gọi `/spin` trước khi SSV kịp tới, server trả `403 AD_NOT_VERIFIED`. Đây là lỗi tạm thời: **retry sau vài giây** với cùng `intent_id`. Ngày reset theo timezone của config spin trong region.
 
@@ -1903,16 +2067,22 @@ Response `200`:
   ],
   "prizes_display": [
     { "slot": 1, "type": "coin", "value": "10", "tier": "low", "label": "10 coin", "pct": 45.5 }
-  ]
+  ],
+  "active_boost": null
 }
 ```
 
 - `ticket_coin` luôn `"0"` (giữ lại để tương thích).
 - `spins_remaining` = min(`daily_cap − spins_today`, `ads_remaining`). Đây là số lượt user thật sự còn quay được.
 - `ads_remaining` / `next_ad_available_at`: quota và cooldown của placement `luckyspin`. Field sau là ISO string hoặc `null` nếu không bị cooldown.
-- `free_spin_available`: còn lượt free hôm nay **và** còn quota ad.
+- `free_spin_available`: hôm nay chưa quay free. Không phụ thuộc quota ad.
 - `spins_today`, `daily_cap` chỉ tính lượt paid.
 - `paid_prizes_display` / `free_prizes_display`: bảng giải của từng loại. `prizes_display` là alias của bảng paid dành cho client cũ. `value` là string. `pct` là xác suất cơ bản (%, làm tròn 1 chữ số thập phân). Pity có thể tăng tỉ lệ tier `high` (×3 trọng số) sau một chuỗi lượt paid không trúng high hoặc jackpot. `type` gồm `coin` | `voucher` | `boost`, `tier` gồm `low` | `mid` | `high` | `jackpot`.
+- Giải `boost` có `value` dạng `"<hệ số>x<số phút>"`, ví dụ `"2x60"` = thưởng đọc ×2 trong 60 phút. `label` mặc định `"×2 boost"`.
+- **Bảng giải do admin sửa trong CMS bất kỳ lúc nào** (loại giải, giá trị, tỉ lệ, số ô). Mỗi bảng có **1 đến 12 ô**; `slot` là số nguyên dương không trùng (CMS đánh liên tục từ 1). App phải vẽ vòng quay theo đúng mảng trả về (số ô, nhãn, thứ tự `slot`), không hardcode số ô hay giá trị. Nên gọi lại `GET /spin/state` mỗi lần mở màn spin.
+- `label`: nhãn admin tự đặt (tối đa 40 ký tự) hoặc nhãn mặc định server sinh ra: `"<value> coin"` cho coin, `"×<hệ số> boost"` cho boost.
+- Thực tế không còn giải `voucher`: CMS không cho lưu loại này cho tới khi spin hỗ trợ trả voucher. App vẫn nên xử lý `type` lạ an toàn (hiển thị `label`).
+- `active_boost`: boost đang chạy `{ multiplier, expires_at }` hoặc `null` (giống `GET /me`).
 
 Lỗi:
 
@@ -1920,7 +2090,7 @@ Lỗi:
 - `403 SPIN_SUSPENDED`: account không active hoặc fraud score cao.
 - `404 FEATURE_DISABLED`: region tắt spin.
 - `404 USER_NOT_FOUND`.
-- `500 SPIN_CONFIG_MISSING / SPIN_CONFIG_MALFORMED / SPIN_CONFIG_EV_INVALID`: config sai (lỗi server).
+- `500 SPIN_CONFIG_MISSING / SPIN_CONFIG_MALFORMED / SPIN_CONFIG_EV_INVALID`: config sai (lỗi server). `message` nêu ô và luật bị sai (vd `"Slot 3: a boost is written multiplier x minutes, e.g. 2x60"`), chỉ để log, không hiển thị cho user.
 
 ### `POST /spin`
 
@@ -1947,8 +2117,9 @@ Response `200`:
 }
 ```
 
-- `prize_slot` khớp với `slot` trong bảng giải để app dừng vòng quay đúng ô.
+- `prize_slot` khớp với `slot` trong bảng giải để app dừng vòng quay đúng ô. Nếu admin vừa sửa bảng giải sau lần `GET /spin/state` gần nhất, `prize_slot` có thể không có (hoặc khác giải) trong bảng app đang giữ. Khi đó hiển thị kết quả theo `prize_type`/`prize_value` của response rồi gọi lại `GET /spin/state`.
 - `prize_value` là string. Nếu giải bằng 0 coin, số dư không đổi.
+- Khi trúng giải `boost`: không cộng coin, response có thêm `"boost": { "multiplier": 2, "expires_at": "…" }`. Nếu user đang có boost chạy, boost mới được **xếp hàng sau** boost hiện tại (bắt đầu khi boost cũ hết hạn), nên `expires_at` có thể xa hơn 60 phút.
 
 Lỗi:
 
@@ -1958,19 +2129,22 @@ Lỗi:
 - `403 SPIN_SUSPENDED`.
 - `404 FEATURE_DISABLED` / `404 USER_NOT_FOUND` / `404 WALLET_NOT_FOUND`.
 - `429 DAILY_CAP_REACHED`: đã hết `daily_cap` lượt paid hôm nay.
-- `503 SPIN_PRIZE_UNSUPPORTED`: trúng ô giải không phải coin (voucher/boost chưa hỗ trợ). Toàn bộ giao dịch rollback và intent **chưa** bị tiêu.
+- `503 SPIN_PRIZE_UNSUPPORTED`: trúng ô giải `voucher` (chưa hỗ trợ). Toàn bộ giao dịch rollback và intent **chưa** bị tiêu.
 - `500 SPIN_CONFIG_*`: lỗi config.
 
 ### `POST /spin/free`
 
-Lượt quay **free** mỗi ngày (vẫn cần ad `luckyspin`). Giải được ghi thành `FREE_SPIN_PRIZE_CREDIT` (unbacked). **Auth:** Bearer. **Headers:** App headers.
+Lượt quay **free** mỗi ngày, **không cần xem quảng cáo**. Giải được ghi thành `FREE_SPIN_PRIZE_CREDIT` (unbacked). **Auth:** Bearer. **Headers:** App headers. **Rate limit:** 10 request/60s/user.
 
-Body và Response giống hệt `POST /spin` (bảng giải dùng `free_prizes_display`).
+Body: không bắt buộc. Có thể bỏ trống, gửi `{}`, hoặc gửi `{ "intent_id": "…" }` (build cũ có xem ad trước lượt free). Nếu có `intent_id` thì intent được kiểm tra và tiêu như ở `POST /spin`.
+
+Response giống hệt `POST /spin` (bảng giải dùng `free_prizes_display`).
 
 Lỗi: giống `POST /spin`, chỉ khác:
 
 - Thay `429 DAILY_CAP_REACHED` bằng `429 FREE_SPIN_ALREADY_CLAIMED`: hôm nay đã quay free.
-- Có thể gặp thêm `429 UNBACKED_CAP_EXCEEDED` / `429 MINT_PAUSED`.
+- `403 AD_NOT_VERIFIED` chỉ xảy ra khi có gửi `intent_id`.
+- Có thể gặp thêm `429 RATE_LIMITED` / `429 UNBACKED_CAP_EXCEEDED` / `429 MINT_PAUSED`.
 
 ### `GET /spin/recent-wins`
 
@@ -2117,7 +2291,8 @@ Response `200`:
       "coin_price": "110000",
       "image_url": "https://cdn.example.com/catalog/gplay.png",
       "available": true,
-      "stock_note": null
+      "stock_note": null,
+      "recipient_type": "none"
     }
   ]
 }
@@ -2127,6 +2302,7 @@ Response `200`:
 - `coin_price` là **string**.
 - `available` hiện luôn `true`.
 - `image_url`, `stock_note` có thể `null`.
+- `recipient_type`: `none` (quà là mã, giao qua `GET /redemptions/:id/code`) | `paypal_email` (tiền được gửi vào tài khoản PayPal — app phải hỏi email PayPal trước khi đổi và gửi kèm `recipient_email` ở `POST /redemptions`).
 - Item được lọc theo IP lúc xem, nhưng khi tạo đơn server kiểm tra lại theo `country_code`/`region_id` lưu trên account. Vì vậy một item thấy được trong catalog vẫn có thể bị từ chối nếu user dùng VPN.
 
 Lỗi:
@@ -2139,9 +2315,10 @@ Tạo đơn đổi quà. Coin bị trừ ngay khỏi `available` (`REDEMPTION_DE
 
 Body:
 
-| Field             | Kiểu   | Bắt buộc | Ràng buộc                          |
-| ----------------- | ------ | -------- | ---------------------------------- |
-| `catalog_item_id` | string | có       | `id` (UUID) của item trong catalog |
+| Field             | Kiểu   | Bắt buộc | Ràng buộc                                                                                                                                                                    |
+| ----------------- | ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `catalog_item_id` | string | có       | `id` (UUID) của item trong catalog                                                                                                                                           |
+| `recipient_email` | string | tuỳ item | Email PayPal nhận tiền, ≤ 254 ký tự, dạng `a@b.c`, không có khoảng trắng (app tự trim). **Bắt buộc** khi item có `recipient_type = "paypal_email"`; bị bỏ qua với item khác. |
 
 ```json
 { "catalog_item_id": "01929e00-aaaa-7bbb-8ccc-000000000001" }
@@ -2168,6 +2345,7 @@ Response `200` (`RedemptionResponse`):
   "delivery_note": null,
   "delivered_at": null,
   "claimed_at": null,
+  "recipient_email_masked": null,
   "claim_state": "PENDING",
   "claimable_at": "2026-10-16T03:30:00.000Z",
   "seconds_until_claimable": 172800,
@@ -2181,10 +2359,12 @@ Response `200` (`RedemptionResponse`):
 - `reward` là snapshot của item tại thời điểm đổi. Field ở đây dùng tên DB (`category`, `face_value`), khác với tên trong catalog (`category_id`, `subtitle`).
 - `coin_price`, `usd_cost_est` là string. `fraud_score_at_request` là number hoặc `null`.
 - `seconds_until_claimable` (integer ≥ 0) dùng để chạy countdown. `can_claim_now` tương đương `claim_state == "CLAIMABLE"`.
+- `recipient_email_masked`: email PayPal đã nhập, dạng che (`a***@gmail.com`), để hiện "Gửi tới a***@gmail.com"; `null` với quà dạng mã. Server không bao giờ trả lại email đầy đủ. Với quà PayPal, "mã" ở `GET /redemptions/:id/code` là mã giao dịch PayPal.
 
 Lỗi:
 
-- `400 VALIDATION_ERROR`: thiếu `catalog_item_id`.
+- `400 VALIDATION_ERROR`: thiếu `catalog_item_id`, hoặc `recipient_email` sai định dạng.
+- `400 RECIPIENT_REQUIRED`: item cần email PayPal nhưng không gửi `recipient_email`. Không trừ coin.
 - `400 CATALOG_ITEM_UNAVAILABLE`: item không tồn tại, đã tắt, hoặc không bán cho quốc gia hay region của account.
 - `400 REDEMPTION_WEEKLY_CAP`: vượt trần USD đổi quà trong 7 ngày cuộn (trần theo trust level).
 - `400 INSUFFICIENT_BALANCE`: không đủ coin available.
@@ -2318,3 +2498,74 @@ Lỗi:
   }
   ```
 - `429 RATE_LIMITED`: quá 5 lần/giờ cho đơn này. Rate limit được kiểm tra **trước** mọi điều kiện khác, nên các lần gọi bị 404/409 cũng bị tính vào quota.
+
+## 14. Phản hồi & báo cáo
+
+### `POST /feedback`
+
+Gửi đánh giá app từ màn "Rate the app". **Auth:** Bearer. **Headers:** App headers (`X-App-Version` được lưu kèm). **Rate limit:** 5 lần/giờ/user.
+
+Body:
+
+| Field     | Kiểu    | Bắt buộc | Ràng buộc                                                               |
+| --------- | ------- | -------- | ----------------------------------------------------------------------- |
+| `rating`  | integer | có       | 1–5 sao                                                                 |
+| `message` | string  | không    | ≤ 2000 ký tự. Chỉ có khoảng trắng thì coi như không có.                 |
+| `email`   | string  | không    | Email để đội ngũ trả lời, ≤ 254 ký tự, dạng `a@b.c`, không khoảng trắng |
+
+```json
+{ "rating": 4, "message": "Love the reader, wish it had dark mode", "email": "reader@example.com" }
+```
+
+Response `200`:
+
+```json
+{ "id": "0192fa00-0000-7000-8000-000000000001", "created_at": "2026-10-14T08:30:00.000Z" }
+```
+
+- Server chỉ lưu để đội ngũ đọc trong CMS; không có phản hồi tự động. Với 4–5 sao app có thể mở luôn trang đánh giá trên store.
+
+Lỗi:
+
+- `400 VALIDATION_ERROR` — `rating` ngoài 1–5, `message` quá dài, `email` sai định dạng.
+- `429 RATE_LIMITED` — quá 5 lần/giờ.
+
+### `POST /reports`
+
+Báo cáo nội dung (truyện, chương) hoặc sự cố app từ màn "Report a problem". **Auth:** Bearer. **Rate limit:** 10 lần/giờ/user.
+
+Body:
+
+| Field         | Kiểu   | Bắt buộc | Ràng buộc                                                                                                          |
+| ------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `target_type` | string | có       | `novel` \| `chapter` \| `app`                                                                                      |
+| `target_id`   | string | tuỳ loại | UUID. **Bắt buộc** với `novel` (id truyện) và `chapter` (`id` UUID của chương trong mục lục); bị bỏ qua với `app`. |
+| `reason`      | string | có       | `inappropriate` \| `copyright` \| `wrong_content` \| `spam` \| `other`                                             |
+| `message`     | string | không    | ≤ 2000 ký tự                                                                                                       |
+
+```json
+{
+  "target_type": "chapter",
+  "target_id": "0192f7b1-aaaa-7bbb-8ccc-000000000065",
+  "reason": "wrong_content",
+  "message": "Đoạn 3 bị lặp"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "id": "0192fa10-0000-7000-8000-000000000001",
+  "status": "open",
+  "created_at": "2026-10-14T08:30:00.000Z"
+}
+```
+
+- Báo cáo được đội ngũ xử lý trong CMS; app không cần theo dõi trạng thái.
+
+Lỗi:
+
+- `400 VALIDATION_ERROR` — thiếu `target_id` với `novel`/`chapter`, `target_type`/`reason` không hợp lệ, `message` quá dài.
+- `404 REPORT_TARGET_NOT_FOUND` — không có truyện/chương với `target_id` này.
+- `429 RATE_LIMITED` — quá 10 lần/giờ.

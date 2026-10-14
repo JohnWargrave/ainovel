@@ -5,7 +5,7 @@ import ipaddr from 'ipaddr.js';
 import type { JWT } from '@fastify/jwt';
 import type { Transaction } from 'kysely';
 import { db } from '../../db/index.js';
-import type { DB } from '../../db/types.js';
+import type { DB, WelcomeMode } from '../../db/types.js';
 import { AppError } from '../../lib/errors.js';
 import { displayName } from '../../lib/display-name.js';
 import { checkSubjectRateLimit } from '../../lib/rate-limit.js';
@@ -22,7 +22,11 @@ import { issueTokenPair, type SessionContext, type TokenPair } from './jwt.js';
 import type { AuthProviders } from './ports.js';
 import type { AuthEmailSender } from './auth-email.js';
 import { recordAuthEvent, type AuthEventContext } from './auth-events.js';
-import { getCoinRewardSettingsInTransaction } from '../config/coin-reward-settings.service.js';
+import {
+  getCoinRewardSettings,
+  getCoinRewardSettingsInTransaction,
+} from '../config/coin-reward-settings.service.js';
+import { activeBoost, type ActiveBoost } from '../spin/boost.service.js';
 
 const RECOVER_RATE_LIMIT_WINDOW_S = 3_600;
 const RECOVER_RATE_LIMIT_MAX = 5;
@@ -53,6 +57,8 @@ export interface DeviceInput {
 
 export interface PublicUser {
   id: string;
+  // Display-only numeric ID for the profile screen; the UUID stays the key.
+  public_id: string;
   auth_provider: string;
   trust_level: number;
   region_id: string;
@@ -71,6 +77,7 @@ export interface AuthResult extends TokenPair {
 
 interface UserRow {
   id: string;
+  public_id: string;
   auth_provider: string;
   auth_subject: string;
   email: string | null;
@@ -84,6 +91,7 @@ interface UserRow {
 function toPublicUser(user: UserRow): PublicUser {
   return {
     id: user.id,
+    public_id: user.public_id,
     auth_provider: user.auth_provider,
     trust_level: user.trust_level,
     region_id: user.region_id,
@@ -162,6 +170,12 @@ async function ensureRewardCreditInTransaction(
   });
 }
 
+// Under link_required a guest's welcome bonus waits for their first bind; the bind calls back into
+// ensureAuthCreditsInTransaction with the bound provider and pays it then.
+export function isWelcomeDeferred(mode: WelcomeMode, provider: string): boolean {
+  return mode === 'link_required' && provider === 'guest';
+}
+
 async function ensureAuthCreditsInTransaction(
   trx: Transaction<DB>,
   userId: string,
@@ -180,12 +194,9 @@ async function ensureAuthCreditsInTransaction(
   }
 
   const settings = await getCoinRewardSettingsInTransaction(trx);
-  const welcome = await ensureRewardCreditInTransaction(
-    trx,
-    userId,
-    'WELCOME_CREDIT',
-    settings.welcome_coin,
-  );
+  const welcome = isWelcomeDeferred(settings.welcome_mode, provider)
+    ? EMPTY_AUTH_CREDIT
+    : await ensureRewardCreditInTransaction(trx, userId, 'WELCOME_CREDIT', settings.welcome_coin);
   const google =
     provider === 'google'
       ? await ensureRewardCreditInTransaction(
@@ -231,7 +242,7 @@ async function createUserWithDevice(
   return db.transaction().execute(async (trx) => {
     const userId = uuidv7();
     const referralCode = await assignReferralCode(trx);
-    await trx
+    const { public_id: publicId } = await trx
       .insertInto('users')
       .values({
         id: userId,
@@ -242,7 +253,8 @@ async function createUserWithDevice(
         region_id: regionId,
         referral_code: referralCode,
       })
-      .execute();
+      .returning('public_id')
+      .executeTakeFirstOrThrow();
 
     await trx.insertInto('wallets').values({ user_id: userId }).execute();
 
@@ -308,6 +320,7 @@ async function createUserWithDevice(
 
     const user: UserRow = {
       id: userId,
+      public_id: publicId,
       auth_provider: authProvider,
       auth_subject: authSubject,
       email,
@@ -359,6 +372,7 @@ async function tryRecoverGuest(
       'users.region_id as region_id',
       'users.trust_level as trust_level',
       'users.referral_code as referral_code',
+      'users.public_id as public_id',
       'users.created_at as created_at',
       'users.status as status',
       'devices.id as device_row_id',
@@ -381,6 +395,7 @@ async function tryRecoverGuest(
         'users.region_id as region_id',
         'users.trust_level as trust_level',
         'users.referral_code as referral_code',
+        'users.public_id as public_id',
         'users.created_at as created_at',
         'users.status as status',
         'devices.id as device_row_id',
@@ -916,6 +931,7 @@ export async function passwordLogin(
       'users.region_id',
       'users.trust_level',
       'users.referral_code',
+      'users.public_id',
       'users.created_at',
       'users.status',
       'password_credentials.password_hash',
@@ -1253,6 +1269,7 @@ export async function verifyPasswordEmail(
 
 export async function getUserProfile(userId: string): Promise<{
   id: string;
+  public_id: string;
   username: string;
   avatar_url: string | null;
   auth_provider: string;
@@ -1260,6 +1277,8 @@ export async function getUserProfile(userId: string): Promise<{
   region_id: string;
   referral_code: string | null;
   wallet: { available_coin: string; pending_coin: string };
+  active_boost: ActiveBoost | null;
+  welcome: { coin: number; claimed: boolean; mode: WelcomeMode };
 }> {
   const row = await db
     .selectFrom('users')
@@ -1267,6 +1286,7 @@ export async function getUserProfile(userId: string): Promise<{
     .leftJoin('password_credentials', 'password_credentials.user_id', 'users.id')
     .select([
       'users.id',
+      'users.public_id',
       'users.auth_provider',
       'users.trust_level',
       'users.region_id',
@@ -1284,6 +1304,7 @@ export async function getUserProfile(userId: string): Promise<{
 
   return {
     id: row.id,
+    public_id: row.public_id,
     username: row.password_username ?? displayName(userId),
     avatar_url: null,
     auth_provider: row.auth_provider,
@@ -1294,5 +1315,27 @@ export async function getUserProfile(userId: string): Promise<{
       available_coin: row.available_coin,
       pending_coin: row.pending_coin,
     },
+    active_boost: await activeBoost(db, userId),
+    welcome: await welcomeStatus(userId),
+  };
+}
+
+async function welcomeStatus(
+  userId: string,
+): Promise<{ coin: number; claimed: boolean; mode: WelcomeMode }> {
+  const [settings, credit] = await Promise.all([
+    getCoinRewardSettings(),
+    db
+      .selectFrom('coin_ledger')
+      .select('amount')
+      .where('user_id', '=', userId)
+      .where('entry_type', '=', 'WELCOME_CREDIT')
+      .executeTakeFirst(),
+  ]);
+  return {
+    // What was actually paid once claimed; the current setting while still owed.
+    coin: credit ? Number(credit.amount) : settings.welcome_coin,
+    claimed: credit !== undefined,
+    mode: settings.welcome_mode,
   };
 }

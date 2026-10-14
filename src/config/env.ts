@@ -58,6 +58,9 @@ const EnvSchema = Type.Object({
   // Optional: without a registered deeplink/landing page there is no correct value, and the field is
   // omitted from the response rather than emitting a link that goes nowhere.
   REFERRAL_SHARE_BASE_URL: Type.Optional(Type.String()),
+  // Base of the story link GET /novels/:id hands the app to share (the slug is appended as /{slug}).
+  // Optional for the same reason as REFERRAL_SHARE_BASE_URL.
+  NOVEL_SHARE_BASE_URL: Type.Optional(Type.String()),
 });
 
 export type Env = Static<typeof EnvSchema>;
@@ -110,6 +113,7 @@ export function loadEnv(source: NodeJS.ProcessEnv): Env {
     S3_FORCE_PATH_STYLE: source['S3_FORCE_PATH_STYLE'] === 'true',
     S3_PUBLIC_BASE_URL: source['S3_PUBLIC_BASE_URL'],
     REFERRAL_SHARE_BASE_URL: source['REFERRAL_SHARE_BASE_URL'],
+    NOVEL_SHARE_BASE_URL: source['NOVEL_SHARE_BASE_URL'],
   };
 
   // Cast coerces string env values (e.g. PORT="3000") into schema types and fills defaults;
@@ -143,7 +147,9 @@ function assertProductionSecrets(config: Env): void {
   };
   for (const [name, value] of Object.entries(secrets)) {
     if (value.length < MIN_PRODUCTION_SECRET_LENGTH) {
-      problems.push(`  - /${name}: must be at least ${String(MIN_PRODUCTION_SECRET_LENGTH)} characters`);
+      problems.push(
+        `  - /${name}: must be at least ${String(MIN_PRODUCTION_SECRET_LENGTH)} characters`,
+      );
     }
   }
   if (config.JWT_ACCESS_SECRET === config.JWT_REFRESH_SECRET) {

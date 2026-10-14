@@ -20,6 +20,10 @@ interface AdminNovelBody {
   chapter_count: number;
   cover_url: string | null;
   vip_from_chapter: number | null;
+  rating: number | null;
+  read_count: number;
+  ai_generated: boolean;
+  editor_reviewed: boolean;
 }
 
 interface AdminChapterBody {
@@ -208,6 +212,38 @@ describe('novel CMS', () => {
         headers: adminHeaders(editor, false),
       });
       expect(got.json<AdminNovelBody>().chapter_count).toBe(1);
+    });
+
+    it('stores the reader-facing rating and AI disclosure', async () => {
+      const novel = await createNovel(editor, {
+        title: `Rated ${randomUUID().slice(0, 6)}`,
+        rating: 4.75,
+        ai_generated: true,
+      });
+      // NUMERIC(2,1) keeps one decimal.
+      expect(novel).toMatchObject({
+        rating: 4.8,
+        read_count: 0,
+        ai_generated: true,
+        editor_reviewed: false,
+      });
+
+      const update = await app.inject({
+        method: 'POST',
+        url: `/admin/novels/${novel.id}`,
+        headers: adminHeaders(editor),
+        payload: { rating: null, editor_reviewed: true },
+      });
+      expect(update.statusCode).toBe(200);
+      expect(update.json<AdminNovelBody>()).toMatchObject({ rating: null, editor_reviewed: true });
+
+      const outOfRange = await app.inject({
+        method: 'POST',
+        url: `/admin/novels/${novel.id}`,
+        headers: adminHeaders(editor),
+        payload: { rating: 5.5 },
+      });
+      expect(outOfRange.statusCode).toBe(400);
     });
 
     it('derives effective VIP from the novel policy and per-chapter overrides', async () => {

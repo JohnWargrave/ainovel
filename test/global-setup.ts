@@ -11,6 +11,9 @@ import { Redis } from 'ioredis';
 // `/config` call.
 const DATA_TABLES = [
   'users',
+  'user_preferences',
+  'app_feedback',
+  'content_reports',
   'admin_sessions',
   'user_identities',
   'password_credentials',
@@ -27,6 +30,7 @@ const DATA_TABLES = [
   'redemptions',
   'redemption_status_history',
   'spin_history',
+  'user_boosts',
   'fraud_flags',
   'audit_log',
   'inbox_messages',
@@ -34,6 +38,7 @@ const DATA_TABLES = [
   'novel_import_chapters',
   'novel_import_jobs',
   'novel_read_progress',
+  'novel_read_daily',
   'novel_chapter_unlocks',
   'novel_library',
   'novel_chapter_revisions',

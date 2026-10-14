@@ -59,7 +59,7 @@ interface TaskListBody {
     completed_today: boolean;
     icon_url: string | null;
     action: string | null;
-    status: 'available' | 'completed';
+    status: 'available' | 'in_progress' | 'completed';
     progress: number;
     target: number;
   }[];
@@ -219,6 +219,101 @@ describe('daily earning (check-in + tasks)', () => {
     expect(stateBody.days_claimed).toBe(1);
     // Already claimed today, so the next payout is tomorrow's tier.
     expect(stateBody.next_reward_coin).toBe(stateBody.rewards[1]);
+  });
+
+  describe('check-in ad bonus', () => {
+    async function checkinIntent(
+      userId: string,
+      overrides?: { status?: string; placement?: string },
+    ): Promise<string> {
+      const id = uuidv7();
+      await db
+        .insertInto('rewarded_ad_intents')
+        .values({
+          id,
+          user_id: userId,
+          region_id: 'VN',
+          status: overrides?.status ?? 'consumed',
+          placement: overrides?.placement ?? 'checkin',
+          expires_at: new Date(Date.now() + 10 * 60 * 1000),
+        })
+        .execute();
+      return id;
+    }
+
+    async function double(
+      userId: string,
+      intentId: string,
+    ): Promise<ReturnType<FastifyInstance['inject']>> {
+      return app.inject({
+        method: 'POST',
+        url: '/checkin/double',
+        headers: auth(userId),
+        payload: { intent_id: intentId },
+      });
+    }
+
+    it('needs today claimed first', async () => {
+      const userId = await createUser(await enabledRegion());
+      const res = await double(userId, await checkinIntent(userId));
+      expect(res.statusCode).toBe(409);
+      expect(res.json<ErrorResponseBody>().error.code).toBe('CHECKIN_NOT_CLAIMED');
+    });
+
+    it("pays today's reward again for a verified checkin ad, once per day", async () => {
+      const userId = await createUser(await enabledRegion());
+      await seedCheckin(userId, 1);
+      await app.inject({ method: 'POST', url: '/checkin/claim', headers: auth(userId) });
+
+      const before = await app.inject({
+        method: 'GET',
+        url: '/checkin/state',
+        headers: auth(userId),
+      });
+      expect(before.json()).toMatchObject({
+        streak_day: 2,
+        bonus_coin: 15,
+        bonus_claimed_today: false,
+      });
+
+      const intentId = await checkinIntent(userId);
+      const res = await double(userId, intentId);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ credited_coin: 15, new_balance: '30' });
+
+      const intent = await db
+        .selectFrom('rewarded_ad_intents')
+        .select('checkin_bonus_ledger_id')
+        .where('id', '=', intentId)
+        .executeTakeFirstOrThrow();
+      expect(intent.checkin_bonus_ledger_id).not.toBeNull();
+
+      const replay = await double(userId, intentId);
+      expect(replay.statusCode).toBe(403);
+      expect(replay.json<ErrorResponseBody>().error.code).toBe('AD_NOT_VERIFIED');
+
+      const second = await double(userId, await checkinIntent(userId));
+      expect(second.statusCode).toBe(409);
+      expect(second.json<ErrorResponseBody>().error.code).toBe('ALREADY_CLAIMED');
+
+      const after = await app.inject({
+        method: 'GET',
+        url: '/checkin/state',
+        headers: auth(userId),
+      });
+      expect(after.json()).toMatchObject({ bonus_claimed_today: true });
+    });
+
+    it('rejects an unverified or wrong-placement intent', async () => {
+      const userId = await createUser(await enabledRegion());
+      await app.inject({ method: 'POST', url: '/checkin/claim', headers: auth(userId) });
+
+      const pending = await double(userId, await checkinIntent(userId, { status: 'pending' }));
+      expect(pending.statusCode).toBe(403);
+      const spinAd = await double(userId, await checkinIntent(userId, { placement: 'luckyspin' }));
+      expect(spinAd.statusCode).toBe(403);
+      expect(spinAd.json<ErrorResponseBody>().error.code).toBe('AD_NOT_VERIFIED');
+    });
   });
 
   it('treats one Vietnam calendar day as one day even across a UTC date change', async () => {
@@ -433,6 +528,87 @@ describe('daily earning (check-in + tasks)', () => {
       progress: 0,
       target: 1,
     });
+  });
+
+  it('pays progress tasks only once the measured progress reaches the target', async () => {
+    const progressTasks = [
+      {
+        id: 'read_10',
+        title: 'Read for 10 minutes',
+        description: 'Read any story',
+        reward_coin: 30,
+        task_type: 'read_minutes',
+        target: 10,
+      },
+      {
+        id: 'finish_3',
+        title: 'Finish 3 chapters',
+        description: 'Finish chapters',
+        reward_coin: 40,
+        task_type: 'finish_chapters',
+        target: 3,
+      },
+      {
+        id: 'videos_3',
+        title: 'Watch 3 videos',
+        description: 'Watch videos',
+        reward_coin: 15,
+        task_type: 'watch_videos',
+        target: 3,
+      },
+    ];
+    const userId = await createUser(
+      await enabledRegion({ tasks: { enabled: true, list: progressTasks } }),
+    );
+    const today = new Date().toISOString().slice(0, 10);
+    await db
+      .insertInto('novel_read_daily')
+      .values({ user_id: userId, day: today, read_seconds: 6 * 60 + 59, chapters_completed: 3 })
+      .execute();
+    // One verified view today, one from yesterday that must not count, one still pending.
+    for (const [status, consumedAt] of [
+      ['consumed', new Date()],
+      ['consumed', new Date(Date.now() - 2 * DAY_MS)],
+      ['pending', null],
+    ] as const) {
+      await db
+        .insertInto('rewarded_ad_intents')
+        .values({
+          id: uuidv7(),
+          user_id: userId,
+          region_id: 'VN',
+          status,
+          placement: 'earncoin',
+          consumed_at: consumedAt,
+          expires_at: new Date(Date.now() + 10 * 60 * 1000),
+        })
+        .execute();
+    }
+
+    const list = await app.inject({ method: 'GET', url: '/earning/tasks', headers: auth(userId) });
+    expect(list.statusCode).toBe(200);
+    const byId = new Map(list.json<TaskListBody>().tasks.map((task) => [task.id, task]));
+    expect(byId.get('read_10')).toMatchObject({ status: 'in_progress', progress: 6, target: 10 });
+    expect(byId.get('finish_3')).toMatchObject({ status: 'available', progress: 3, target: 3 });
+    expect(byId.get('videos_3')).toMatchObject({ status: 'in_progress', progress: 1, target: 3 });
+
+    const early = await app.inject({
+      method: 'POST',
+      url: '/earning/tasks/claim',
+      headers: auth(userId),
+      payload: { task_id: 'read_10' },
+    });
+    expect(early.statusCode).toBe(409);
+    expect(early.json<ErrorResponseBody>().error.code).toBe('TASK_NOT_COMPLETE');
+
+    const done = await app.inject({
+      method: 'POST',
+      url: '/earning/tasks/claim',
+      headers: auth(userId),
+      payload: { task_id: 'finish_3' },
+    });
+    expect(done.statusCode).toBe(200);
+    expect(done.json<TaskClaimBody>().credited_coin).toBe(40);
   });
 
   it('exposes icon and action from config, defaulting to null', async () => {

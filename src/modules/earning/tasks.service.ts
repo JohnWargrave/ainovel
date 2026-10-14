@@ -5,14 +5,61 @@ import { creditInTransaction } from '../wallet-ledger/ledger.service.js';
 import { loadUserRegionFeatures, readFeature } from './region-features.js';
 import type { TaskListResponse, TaskClaimResponse } from './tasks-schemas.js';
 
+// Tasks whose progress the server measures itself. They pay only once progress reaches the target;
+// every other type is a self-asserted single-shot claim.
+const PROGRESS_TASK_TYPES = ['read_minutes', 'finish_chapters', 'watch_videos'] as const;
+type ProgressTaskType = (typeof PROGRESS_TASK_TYPES)[number];
+
 interface TaskConfig {
   id: string;
   title: string;
   description: string;
   reward_coin: number;
-  task_type: 'watch_ad' | 'invite_friend' | 'share_app' | 'daily_login';
+  task_type: 'watch_ad' | 'invite_friend' | 'share_app' | 'daily_login' | ProgressTaskType;
+  // Progress tasks only: minutes for read_minutes, a count for the others. Defaults to 1.
+  target?: number;
   icon_url?: string | null;
   action?: string | null;
+}
+
+type DailyProgress = Record<ProgressTaskType, number>;
+
+function isProgressTask(task: TaskConfig): task is TaskConfig & { task_type: ProgressTaskType } {
+  return (PROGRESS_TASK_TYPES as readonly string[]).includes(task.task_type);
+}
+
+function targetOf(task: TaskConfig): number {
+  if (!isProgressTask(task)) return 1;
+  return typeof task.target === 'number' && Number.isInteger(task.target) && task.target > 0
+    ? task.target
+    : 1;
+}
+
+// Today's server-measured totals, in the region-local day the tasks reset on.
+async function dailyProgress(userId: string, timezone: string, now: Date): Promise<DailyProgress> {
+  const window = dayWindow(timezone, now);
+  const [reading, ads] = await Promise.all([
+    db
+      .selectFrom('novel_read_daily')
+      .select(['read_seconds', 'chapters_completed'])
+      .where('user_id', '=', userId)
+      .where('day', '=', dayKey(timezone, now))
+      .executeTakeFirst(),
+    // Any placement: the task is "watch N videos", and every consumed intent is an SSV-verified view.
+    db
+      .selectFrom('rewarded_ad_intents')
+      .select((eb) => eb.fn.countAll<string>().as('total'))
+      .where('user_id', '=', userId)
+      .where('status', '=', 'consumed')
+      .where('consumed_at', '>=', window.start)
+      .where('consumed_at', '<', window.end)
+      .executeTakeFirstOrThrow(),
+  ]);
+  return {
+    read_minutes: Math.floor((reading?.read_seconds ?? 0) / 60),
+    finish_chapters: reading?.chapters_completed ?? 0,
+    watch_videos: Number(ads.total),
+  };
 }
 
 interface TasksFeature {
@@ -36,7 +83,8 @@ async function resolveTasks(userId: string): Promise<ResolvedTasks> {
   const { timezone, features } = await loadUserRegionFeatures(userId);
   const feature = readFeature<TasksFeature>(features, 'tasks');
   // Fail closed: an absent `tasks` key means the module was never configured for this region, which
-  // must read as "off", not as "on with defaults".
+  // must read as "off", not as "on with defaults". `watch_videos` is unaffected by the watch_ad
+  // exclusion below: it pays a bonus for N SSV-verified views, not for one self-reported view.
   if (!feature.enabled) {
     throw new AppError('FEATURE_DISABLED', 'Daily tasks are not available', 404);
   }
@@ -71,12 +119,25 @@ export async function listTasks(userId: string): Promise<TaskListResponse> {
   const completedIds = new Set(
     claimedRows.map((row) => keyToTaskId.get(row.idempotency_key ?? '')),
   );
+  const measured = list.some(isProgressTask) ? await dailyProgress(userId, timezone, now) : null;
 
   return {
     // Built field by field rather than spreading `task`: the config object is admin-editable JSON,
     // and spreading it would leak any extra key an admin adds straight into the public response.
     tasks: list.map((task) => {
       const completed = completedIds.has(task.id);
+      const target = targetOf(task);
+      const progress =
+        isProgressTask(task) && measured
+          ? Math.min(measured[task.task_type], target)
+          : completed
+            ? 1
+            : 0;
+      const status = completed
+        ? ('completed' as const)
+        : isProgressTask(task) && progress < target
+          ? ('in_progress' as const)
+          : ('available' as const);
       return {
         id: task.id,
         title: task.title,
@@ -86,9 +147,9 @@ export async function listTasks(userId: string): Promise<TaskListResponse> {
         icon_url: task.icon_url ?? null,
         action: task.action ?? null,
         completed_today: completed,
-        status: completed ? ('completed' as const) : ('available' as const),
-        progress: completed ? 1 : 0,
-        target: 1,
+        status,
+        progress,
+        target,
       };
     }),
     reset_at: window.end.toISOString(),
@@ -101,6 +162,15 @@ export async function claimTask(userId: string, taskId: string): Promise<TaskCla
   if (!task) {
     throw new AppError('NOT_FOUND', 'Task not found', 404);
   }
+  const now = new Date();
+  if (isProgressTask(task)) {
+    // Checked before the credit and outside its transaction: progress only ever grows within a day,
+    // so a stale read can only under-report, never let an unfinished task through.
+    const measured = await dailyProgress(userId, timezone, now);
+    if (measured[task.task_type] < targetOf(task)) {
+      throw new AppError('TASK_NOT_COMPLETE', 'Task progress has not reached its target', 409);
+    }
+  }
 
   const result = await db.transaction().execute(async (trx) =>
     creditInTransaction(trx, {
@@ -110,7 +180,7 @@ export async function claimTask(userId: string, taskId: string): Promise<TaskCla
       bucket: 'available',
       // No refId: the column is a UUID soft-FK to a source row, and a task id is a config string.
       refType: 'task',
-      idempotencyKey: idempotencyKeyFor(task.id, userId, timezone, new Date()),
+      idempotencyKey: idempotencyKeyFor(task.id, userId, timezone, now),
       note: `Completed task: ${task.title}`,
     }),
   );
