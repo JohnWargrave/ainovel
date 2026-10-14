@@ -382,6 +382,12 @@ interface RedemptionStatusHistoryTable {
   created_at: GeneratedTimestamp;
 }
 
+interface UserPreferencesTable {
+  user_id: string;
+  category_ids: Generated<string[]>;
+  updated_at: GeneratedTimestamp;
+}
+
 interface NovelCategoriesTable {
   id: string;
   slug: string;
@@ -624,6 +630,7 @@ export interface DB {
   admin_users: AdminUsersTable;
   admin_sessions: AdminSessionsTable;
   users: UsersTable;
+  user_preferences: UserPreferencesTable;
   devices: DevicesTable;
   user_identities: UserIdentitiesTable;
   password_credentials: PasswordCredentialsTable;

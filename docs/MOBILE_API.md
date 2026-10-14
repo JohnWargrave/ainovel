@@ -734,6 +734,34 @@ Response 200:
 
 Lỗi: chỉ các lỗi chung.
 
+### `GET /me/preferences` · `PUT /me/preferences`
+
+Thể loại yêu thích (màn chọn thể loại khi onboarding và trong cài đặt), dùng cho hàng `for_you` ở `GET /novels/home`. **Auth:** Bearer.
+
+`PUT` body — thay **toàn bộ** danh sách:
+
+```json
+{ "category_ids": ["0192f7a0-0000-7000-8000-000000000001", "0192f7a0-0000-7000-8000-000000000002"] }
+```
+
+| Field          | Kiểu     | Ràng buộc                                                                                   |
+| -------------- | -------- | ------------------------------------------------------------------------------------------- |
+| `category_ids` | string[] | 0–5 UUID, lấy từ `id` của `GET /novels/categories`. Trùng lặp được bỏ. Mảng rỗng = xoá hết. |
+
+Response 200 (cả `GET` lẫn `PUT`):
+
+```json
+{ "category_ids": ["0192f7a0-0000-7000-8000-000000000001"] }
+```
+
+- `GET` trả `[]` khi user chưa chọn. Thể loại đã bị ẩn sau khi chọn sẽ tự biến mất khỏi danh sách.
+
+Lỗi:
+
+- `400 VALIDATION_ERROR` — quá 5 phần tử hoặc không phải UUID.
+- `400 CATEGORY_NOT_FOUND` — có id không tồn tại hoặc thể loại đang ẩn. Không lưu gì.
+- `429 RATE_LIMITED` — quá 10 lần `PUT`/phút.
+
 ## 3. Hộp thư (Inbox)
 
 Object `InboxMessage`:
@@ -897,6 +925,7 @@ Response `200`:
   "featured": [{ "...": "NovelSummary" }],
   "latest": [{ "...": "NovelSummary" }],
   "popular": [{ "...": "NovelSummary" }],
+  "for_you": [{ "...": "NovelSummary" }],
   "continue_reading": [
     {
       "novel": { "...": "NovelSummary" },
@@ -911,6 +940,7 @@ Response `200`:
 - `featured`: tối đa 10, truyện được admin đánh dấu nổi bật, theo `featured_rank`.
 - `latest`: tối đa 10, theo `updated_at` giảm dần.
 - `popular`: tối đa 10, theo số người đọc khác nhau trong **7 ngày** gần nhất.
+- `for_you`: tối đa 10, truyện thuộc thể loại user đã chọn (`PUT /me/preferences`) mà user **chưa mở**, nhiều người đọc nhất trước. Khi user chưa chọn thể loại hoặc không còn truyện phù hợp, trả đúng danh sách `popular`.
 - `continue_reading`: tối đa 5, những truyện user đã mở chương gần nhất (kể cả không nằm trong tủ sách). `last_chapter_no` là chương đã **mở** gần nhất (được ghi khi gọi `GET /novels/:id/chapters/:chapter_no`). `last_chapter_title` là tiêu đề của chương đó (`null` nếu chương đã bị xoá).
 - Không phân trang.
 

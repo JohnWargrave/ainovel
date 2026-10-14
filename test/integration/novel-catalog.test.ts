@@ -274,4 +274,86 @@ describe('novel catalog', () => {
       expect(retryIn).toBeLessThanOrEqual(1201_000);
     });
   });
+
+  describe('reader preferences', () => {
+    async function createCategory(): Promise<string> {
+      const id = uuidv7();
+      await db
+        .insertInto('novel_categories')
+        .values({ id, slug: `pref-${randomUUID().slice(0, 12)}`, name: 'Preference genre' })
+        .execute();
+      return id;
+    }
+
+    async function link(novelId: string, categoryId: string): Promise<void> {
+      await db
+        .insertInto('novel_category_links')
+        .values({ novel_id: novelId, category_id: categoryId })
+        .execute();
+    }
+
+    async function put(
+      userId: string,
+      categoryIds: string[],
+    ): Promise<ReturnType<FastifyInstance['inject']>> {
+      return app.inject({
+        method: 'PUT',
+        url: '/me/preferences',
+        headers: headers(userId),
+        payload: { category_ids: categoryIds },
+      });
+    }
+
+    it('stores up to five active genres and forgets deactivated ones', async () => {
+      const userId = await createUser(await createRegion());
+      const [first, second] = [await createCategory(), await createCategory()];
+
+      const empty = await get(userId, '/me/preferences');
+      expect(empty.json()).toEqual({ category_ids: [] });
+
+      const saved = await put(userId, [first, second, first]);
+      expect(saved.statusCode).toBe(200);
+      expect(saved.json()).toEqual({ category_ids: [first, second] });
+
+      const unknown = await put(userId, [uuidv7()]);
+      expect(unknown.statusCode).toBe(400);
+      expect(unknown.json<{ error: { code: string } }>().error.code).toBe('CATEGORY_NOT_FOUND');
+      const tooMany = await put(
+        userId,
+        Array.from({ length: 6 }, () => uuidv7()),
+      );
+      expect(tooMany.statusCode).toBe(400);
+
+      await db
+        .updateTable('novel_categories')
+        .set({ is_active: false })
+        .where('id', '=', second)
+        .execute();
+      const after = await get(userId, '/me/preferences');
+      expect(after.json()).toEqual({ category_ids: [first] });
+    });
+
+    it('fills "for you" with unread novels from the chosen genres', async () => {
+      const userId = await createUser(await createRegion());
+      const [liked, other] = [await createCategory(), await createCategory()];
+      const { novelId: fresh } = await createNovel({ chapters: 1 });
+      const { novelId: opened } = await createNovel({ chapters: 1 });
+      const { novelId: elsewhere } = await createNovel({ chapters: 1 });
+      await link(fresh, liked);
+      await link(opened, liked);
+      await link(elsewhere, other);
+      await get(userId, `/novels/${opened}/chapters/1`);
+
+      const before = await get(userId, '/novels/home');
+      const home = before.json<{ popular: { id: string }[]; for_you: { id: string }[] }>();
+      // Nothing chosen yet: the row falls back to popular.
+      expect(home.for_you.map((novel) => novel.id)).toEqual(home.popular.map((novel) => novel.id));
+
+      await put(userId, [liked]);
+      const after = await get(userId, '/novels/home');
+      expect(after.json<{ for_you: { id: string }[] }>().for_you.map((novel) => novel.id)).toEqual([
+        fresh,
+      ]);
+    });
+  });
 });

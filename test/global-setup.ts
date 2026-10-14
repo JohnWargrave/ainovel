@@ -11,6 +11,7 @@ import { Redis } from 'ioredis';
 // `/config` call.
 const DATA_TABLES = [
   'users',
+  'user_preferences',
   'admin_sessions',
   'user_identities',
   'password_credentials',

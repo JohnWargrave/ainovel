@@ -15,6 +15,7 @@ import {
   novelVisibleTo,
   type Reader,
 } from './access.js';
+import { preferredCategoryIds } from './preferences.service.js';
 import { parseNovelFeature, requiredReadSeconds, type NovelFeature } from './region-feature.js';
 import { foldForSearch } from './text.js';
 import type {
@@ -111,6 +112,40 @@ async function toSummaries(rows: readonly SummaryRow[]): Promise<NovelSummary[]>
     ai_generated: row.ai_generated,
     editor_reviewed: row.editor_reviewed,
   }));
+}
+
+// Novels in the reader's preferred genres that they have not opened yet, most-read first.
+async function forYouRows(reader: Reader): Promise<SummaryRow[]> {
+  const categoryIds = await preferredCategoryIds(reader.id);
+  if (categoryIds.length === 0) return [];
+  return db
+    .selectFrom('novels')
+    .select(SUMMARY_COLUMNS)
+    .where(novelVisibleTo(reader))
+    .where((eb) =>
+      eb.exists(
+        eb
+          .selectFrom('novel_category_links')
+          .select('novel_category_links.novel_id')
+          .whereRef('novel_category_links.novel_id', '=', 'novels.id')
+          .where('novel_category_links.category_id', 'in', categoryIds),
+      ),
+    )
+    .where((eb) =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom('novel_library')
+            .select('novel_library.novel_id')
+            .whereRef('novel_library.novel_id', '=', 'novels.id')
+            .where('novel_library.user_id', '=', reader.id),
+        ),
+      ),
+    )
+    .orderBy('novels.read_count', 'desc')
+    .orderBy('novels.updated_at', 'desc')
+    .limit(HOME_SECTION_SIZE)
+    .execute();
 }
 
 function novelShareUrl(slug: string): string | undefined {
@@ -210,6 +245,7 @@ export async function getHome(userId: string): Promise<{
   featured: NovelSummary[];
   latest: NovelSummary[];
   popular: NovelSummary[];
+  for_you: NovelSummary[];
   continue_reading: {
     novel: NovelSummary;
     last_chapter_no: number | null;
@@ -219,7 +255,7 @@ export async function getHome(userId: string): Promise<{
 }> {
   const reader = await loadReader(userId);
   const since = new Date(Date.now() - POPULAR_WINDOW_MS);
-  const [featured, latest, popular, recent] = await Promise.all([
+  const [featured, latest, popular, recent, forYou] = await Promise.all([
     db
       .selectFrom('novels')
       .select(SUMMARY_COLUMNS)
@@ -263,12 +299,16 @@ export async function getHome(userId: string): Promise<{
       .orderBy('novel_library.last_read_at', 'desc')
       .limit(CONTINUE_READING_SIZE)
       .execute(),
+    forYouRows(reader),
   ]);
   const recentSummaries = await toSummaries(recent);
+  const popularSummaries = await toSummaries(popular);
   return {
     featured: await toSummaries(featured),
     latest: await toSummaries(latest),
-    popular: await toSummaries(popular),
+    popular: popularSummaries,
+    // No genres picked, or nothing new left in them: the row still shows something worth reading.
+    for_you: forYou.length > 0 ? await toSummaries(forYou) : popularSummaries,
     continue_reading: recent.flatMap((row, index) => {
       const novel = recentSummaries[index];
       if (!novel) return [];

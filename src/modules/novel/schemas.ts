@@ -79,6 +79,8 @@ export const HomeResponseSchema = Type.Object({
   featured: Type.Array(NovelSummarySchema),
   latest: Type.Array(NovelSummarySchema),
   popular: Type.Array(NovelSummarySchema),
+  // Novels in the reader's preferred genres they have not opened yet; falls back to popular.
+  for_you: Type.Array(NovelSummarySchema),
   continue_reading: Type.Array(
     Type.Object({
       novel: NovelSummarySchema,
@@ -195,6 +197,18 @@ export const UnlockResponseSchema = Type.Object({
   new_balance: Type.String(),
 });
 export type UnlockResponse = Static<typeof UnlockResponseSchema>;
+
+const UuidSchema = Type.String({ format: 'uuid' });
+
+export const PreferencesBodySchema = Type.Object({
+  category_ids: Type.Array(UuidSchema, { maxItems: 5 }),
+});
+export type PreferencesBody = Static<typeof PreferencesBodySchema>;
+
+export const PreferencesResponseSchema = Type.Object({
+  category_ids: Type.Array(Type.String()),
+});
+export type PreferencesResponse = Static<typeof PreferencesResponseSchema>;
 
 export const ReadingStatsResponseSchema = Type.Object({
   // Chapters read to the end (the same completion that earns the chapter reward).

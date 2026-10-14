@@ -16,6 +16,8 @@ import {
   NovelDetailSchema,
   NovelListResponseSchema,
   NovelParamsSchema,
+  PreferencesBodySchema,
+  PreferencesResponseSchema,
   ReadChapterParamsSchema,
   ReadHeartbeatBodySchema,
   ReadHeartbeatResponseSchema,
@@ -27,6 +29,7 @@ import {
   type ListChaptersQuery,
   type ListNovelsQuery,
   type NovelParams,
+  type PreferencesBody,
   type ReadChapterParams,
   type ReadHeartbeatBody,
   type UnlockBody,
@@ -42,6 +45,7 @@ import {
   setBookshelf,
 } from './novel.service.js';
 import { recordReadHeartbeat } from './reading.service.js';
+import { getPreferences, setPreferences } from './preferences.service.js';
 import { getReadingStats } from './reader-stats.service.js';
 import { unlockChapter } from './unlock.service.js';
 
@@ -168,6 +172,27 @@ export function registerNovelRoutes(app: FastifyInstance, deps: Pick<AuthDeps, '
     { preHandler: authGuard, schema: { response: { 200: ReadingStatsResponseSchema } } },
     async (request, reply) => {
       reply.send(await getReadingStats(userId(request)));
+    },
+  );
+
+  app.get(
+    '/me/preferences',
+    { preHandler: authGuard, schema: { response: { 200: PreferencesResponseSchema } } },
+    async (request, reply) => {
+      reply.send(await getPreferences(userId(request)));
+    },
+  );
+
+  app.put<{ Body: PreferencesBody }>(
+    '/me/preferences',
+    {
+      preHandler: authGuard,
+      schema: { body: PreferencesBodySchema, response: { 200: PreferencesResponseSchema } },
+    },
+    async (request, reply) => {
+      const sub = userId(request);
+      await checkSubjectRateLimit('me-preferences', sub, 60, 10);
+      reply.send(await setPreferences(sub, request.body.category_ids));
     },
   );
 
