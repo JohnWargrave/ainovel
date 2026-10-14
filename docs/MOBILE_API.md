@@ -2079,6 +2079,9 @@ Response `200`:
 - `spins_today`, `daily_cap` chỉ tính lượt paid.
 - `paid_prizes_display` / `free_prizes_display`: bảng giải của từng loại. `prizes_display` là alias của bảng paid dành cho client cũ. `value` là string. `pct` là xác suất cơ bản (%, làm tròn 1 chữ số thập phân). Pity có thể tăng tỉ lệ tier `high` (×3 trọng số) sau một chuỗi lượt paid không trúng high hoặc jackpot. `type` gồm `coin` | `voucher` | `boost`, `tier` gồm `low` | `mid` | `high` | `jackpot`.
 - Giải `boost` có `value` dạng `"<hệ số>x<số phút>"`, ví dụ `"2x60"` = thưởng đọc ×2 trong 60 phút. `label` mặc định `"×2 boost"`.
+- **Bảng giải do admin sửa trong CMS bất kỳ lúc nào** (loại giải, giá trị, tỉ lệ, số ô). Mỗi bảng có **1 đến 12 ô**; `slot` là số nguyên dương không trùng (CMS đánh liên tục từ 1). App phải vẽ vòng quay theo đúng mảng trả về (số ô, nhãn, thứ tự `slot`), không hardcode số ô hay giá trị. Nên gọi lại `GET /spin/state` mỗi lần mở màn spin.
+- `label`: nhãn admin tự đặt (tối đa 40 ký tự) hoặc nhãn mặc định server sinh ra: `"<value> coin"` cho coin, `"×<hệ số> boost"` cho boost.
+- Thực tế không còn giải `voucher`: CMS không cho lưu loại này cho tới khi spin hỗ trợ trả voucher. App vẫn nên xử lý `type` lạ an toàn (hiển thị `label`).
 - `active_boost`: boost đang chạy `{ multiplier, expires_at }` hoặc `null` (giống `GET /me`).
 
 Lỗi:
@@ -2087,7 +2090,7 @@ Lỗi:
 - `403 SPIN_SUSPENDED`: account không active hoặc fraud score cao.
 - `404 FEATURE_DISABLED`: region tắt spin.
 - `404 USER_NOT_FOUND`.
-- `500 SPIN_CONFIG_MISSING / SPIN_CONFIG_MALFORMED / SPIN_CONFIG_EV_INVALID`: config sai (lỗi server).
+- `500 SPIN_CONFIG_MISSING / SPIN_CONFIG_MALFORMED / SPIN_CONFIG_EV_INVALID`: config sai (lỗi server). `message` nêu ô và luật bị sai (vd `"Slot 3: a boost is written multiplier x minutes, e.g. 2x60"`), chỉ để log, không hiển thị cho user.
 
 ### `POST /spin`
 
@@ -2114,7 +2117,7 @@ Response `200`:
 }
 ```
 
-- `prize_slot` khớp với `slot` trong bảng giải để app dừng vòng quay đúng ô.
+- `prize_slot` khớp với `slot` trong bảng giải để app dừng vòng quay đúng ô. Nếu admin vừa sửa bảng giải sau lần `GET /spin/state` gần nhất, `prize_slot` có thể không có (hoặc khác giải) trong bảng app đang giữ. Khi đó hiển thị kết quả theo `prize_type`/`prize_value` của response rồi gọi lại `GET /spin/state`.
 - `prize_value` là string. Nếu giải bằng 0 coin, số dư không đổi.
 - Khi trúng giải `boost`: không cộng coin, response có thêm `"boost": { "multiplier": 2, "expires_at": "…" }`. Nếu user đang có boost chạy, boost mới được **xếp hàng sau** boost hiện tại (bắt đầu khi boost cũ hết hạn), nên `expires_at` có thể xa hơn 60 phút.
 
