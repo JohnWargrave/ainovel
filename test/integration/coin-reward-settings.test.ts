@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { uuidv7 } from 'uuidv7';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/index.js';
+import { cacheRedis } from '../../src/redis/index.js';
 
 const ADMIN_API_KEY = 'test-admin-api-key';
 const ADMIN_CSRF_TOKEN = 'test-admin-csrf-token';
@@ -72,6 +73,10 @@ describe('coin reward settings admin API', () => {
     const before = get.json<SettingsBody>();
     expect(before.welcome_coin).toBe(10_000);
     expect(before.google_login).toBe(2_000);
+    // GET /config carries the welcome bonus, so saving must drop its region caches. A key of its own
+    // keeps other suites, which fetch /config for real regions in parallel, from refilling it.
+    const cacheKey = `config:v1:TEST-${randomUUID()}`;
+    await cacheRedis.set(cacheKey, '{}', 'EX', 60);
 
     const put = await app.inject({
       method: 'PUT',
@@ -90,6 +95,7 @@ describe('coin reward settings admin API', () => {
       google_login: 2_000,
       welcome_mode: 'instant',
     });
+    expect(await cacheRedis.get(cacheKey)).toBeNull();
 
     const audit = await db
       .selectFrom('audit_log')

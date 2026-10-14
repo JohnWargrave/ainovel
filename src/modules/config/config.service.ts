@@ -6,6 +6,7 @@ import { cacheRedis } from '../../redis/index.js';
 import { env } from '../../config/env.js';
 import { parseRewardedAdsFeature } from '../rewarded-ads/region-feature.js';
 import { parseNovelFeature } from '../novel/region-feature.js';
+import { getCoinRewardSettings } from './coin-reward-settings.service.js';
 import type { ConfigResponse } from './schemas.js';
 
 const CONFIG_CACHE_PREFIX = 'config:v1:';
@@ -106,7 +107,10 @@ async function buildSpinFeature(features: RegionFeatures): Promise<Record<string
 
 async function buildPayload(regionId: string, features: RegionFeatures): Promise<ConfigResponse> {
   const share = coerceNumber(features.offerwall?.shares?.[DEFAULT_TRUST_LEVEL]);
-  const spin = await buildSpinFeature(features);
+  const [spin, coinRewards] = await Promise.all([
+    buildSpinFeature(features),
+    getCoinRewardSettings(),
+  ]);
   return {
     region: regionId,
     features: {
@@ -148,6 +152,7 @@ async function buildPayload(regionId: string, features: RegionFeatures): Promise
         credit_immediately: features.referral?.credit_immediately === true,
       },
     },
+    welcome: { mode: coinRewards.welcome_mode, coin: coinRewards.welcome_coin },
     coin_per_usd: COIN_PER_USD,
     min_supported_app_version: env.MIN_SUPPORTED_APP_VERSION,
     // D3: minimum redemption is $5 (cheapest gift card). Server-driven so Android doesn't hardcode.

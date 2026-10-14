@@ -4,6 +4,7 @@ import { uuidv7 } from 'uuidv7';
 import { db } from '../../db/index.js';
 import { AppError } from '../../lib/errors.js';
 import { createAdminCsrfGuard, createAdminGuard } from '../../plugins/admin-guard.js';
+import { invalidateConfigCache } from './config.service.js';
 import {
   getCoinRewardSettings,
   MAX_COIN_REWARD,
@@ -106,6 +107,9 @@ export function registerCoinRewardSettingsAdminRoutes(app: FastifyInstance): voi
           .execute();
         return after;
       });
+      // /config carries the welcome bonus; drop the region caches so the app sees the change on its
+      // next fetch instead of up to a minute later.
+      await invalidateConfigCache();
 
       reply.code(200).send(serialize(updated));
     },

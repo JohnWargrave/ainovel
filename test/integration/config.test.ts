@@ -21,6 +21,7 @@ interface ErrorResponseBody {
 
 interface ConfigResponseBody {
   region: string;
+  welcome: { mode: string; coin: number };
   features: {
     spin: { enabled: boolean; ticket_coin: number; daily_cap: number; odds_disclosure: string };
     offerwall: { enabled: boolean; networks: string[]; share_pct: number };
@@ -84,6 +85,7 @@ describe('API contract baseline config', () => {
     expect(body.region).toBe('ROW');
     expect(body.coin_per_usd).toBe(10000);
     expect(body.min_supported_app_version).toBe('1.0.0');
+    expect(body.welcome).toEqual({ mode: 'instant', coin: 10_000 });
     expect(body.features.offerwall.enabled).toBe(true);
     expect(body.features.offerwall.networks).toContain('tapjoy');
     expect(body.features.offerwall.share_pct).toBe(30);

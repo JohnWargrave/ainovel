@@ -159,6 +159,7 @@ Response 200:
       "credit_immediately": false
     }
   },
+  "welcome": { "mode": "instant", "coin": 10000 },
   "coin_per_usd": 10000,
   "min_supported_app_version": "1.0.0",
   "min_redemption_usd": 5
@@ -174,6 +175,7 @@ Ghi chú:
 - Mỗi object trong `features` là free-form (`Record<string, unknown>`); các key ở trên là các key server hiện đang build. Khi tính năng tắt, `spin` chỉ còn `{ "enabled": false }`. Các giá trị khác khi chưa cấu hình sẽ về `false`/`0`/`[]`.
 - `novel.*` và `rewarded_ads.placements` chỉ để hiển thị; việc cộng coin luôn do server quyết định. Placement hợp lệ: `checkin`, `earncoin`, `luckyspin`, `chapter_unlock` (chỉ có key nào đã được cấu hình).
 - `offerwall.share_pct`: phần trăm (0-100) cho trust level 0. `referral.pct` là tỉ lệ thập phân (vd 0.10 = 10%), khác với `share_pct`. `checkin.rewards`: mảng coin theo ngày check-in. `offerwall.networks`, `checkin.rewards` được trả nguyên từ DB.
+- `welcome`: coin chào mừng (cấu hình chung, không theo region). `mode` = `welcome_mode` của `GET /auth/login-offers`: `instant` → màn welcome "Bạn nhận N coin"; `link_required` → màn welcome pending "Liên kết tài khoản để nhận N coin". Khi admin đổi trong CMS, cache server bị xoá ngay; app thấy giá trị mới ở lần gọi `/config` kế tiếp (HTTP cache của chính app vẫn có thể giữ tối đa 60s).
 - `coin_per_usd` cố định 10000. `min_supported_app_version`: client tự so với version của mình để ép cập nhật.
 
 Lỗi:
