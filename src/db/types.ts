@@ -95,6 +95,7 @@ interface OfferwallOffersTable {
   description: Generated<string>;
   icon_url: string | null;
   badge_text: string | null;
+  reward_text: string | null;
   placement: string | null;
   region_ids: Generated<string[]>;
   sort_order: Generated<number>;

@@ -19,6 +19,8 @@ export const OfferwallOfferSchema = Type.Object({
   description: Type.String(),
   icon_url: Type.Union([Type.String(), Type.Null()]),
   badge_text: Type.Union([Type.String(), Type.Null()]),
+  // Earning headline ("Up to $15"); null hides it.
+  reward_text: Type.Union([Type.String(), Type.Null()]),
   placement: Type.Union([Type.String(), Type.Null()]),
 });
 

@@ -367,6 +367,7 @@ export interface OfferwallOffer {
   description: string;
   icon_url: string | null;
   badge_text: string | null;
+  reward_text: string | null;
   placement: string | null;
   region_ids: string[];
   sort_order: number;
@@ -417,6 +418,7 @@ export interface OfferwallOfferInput {
   description?: string;
   icon_url?: string | null;
   badge_text?: string | null;
+  reward_text?: string | null;
   placement?: string | null;
   region_ids: string[];
   sort_order?: number;

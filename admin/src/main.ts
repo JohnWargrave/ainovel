@@ -900,6 +900,7 @@ function offerEditor(data: OfferwallAdminData, offer?: OfferwallOffer): string {
           <label class="field-wide">Description<textarea name="description" rows="3" placeholder="Complete offers and earn coins">${escapeHtml(offer?.description ?? '')}</textarea></label>
           <label>Icon URL<input name="icon_url" type="url" value="${escapeHtml(offer?.icon_url ?? '')}" placeholder="https://…" /></label>
           <label>Badge<input name="badge_text" value="${escapeHtml(offer?.badge_text ?? '')}" placeholder="Featured" /></label>
+          <label>Reward line<input name="reward_text" maxlength="40" value="${escapeHtml(offer?.reward_text ?? '')}" placeholder="Up to $15" /></label>
           <label>Placement override<input name="placement" value="${escapeHtml(offer?.placement ?? '')}" placeholder="Use provider default" /></label>
           <label>Display order<input name="sort_order" type="number" min="0" max="100000" value="${String(offer?.sort_order ?? 0)}" required /></label>
           <label>Starts at<input name="starts_at" type="datetime-local" value="${localDateTime(offer?.starts_at ?? null)}" /></label>
@@ -1151,6 +1152,7 @@ function wireOfferwall(data?: OfferwallAdminData): void {
         description: String(values.get('description') ?? '').trim(),
         icon_url: String(values.get('icon_url') ?? '').trim() || null,
         badge_text: String(values.get('badge_text') ?? '').trim() || null,
+        reward_text: String(values.get('reward_text') ?? '').trim() || null,
         placement: String(values.get('placement') ?? '').trim() || null,
         region_ids: values.getAll('region_ids').map(String),
         sort_order: Number(values.get('sort_order')),

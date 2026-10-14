@@ -4,16 +4,32 @@ import { AppError } from '../../lib/errors.js';
 import { db } from '../../db/index.js';
 import type { AuthDeps } from '../auth/auth.service.js';
 import { AppHeadersSchema } from '../auth/schemas.js';
+import { FROZEN_HOLD_UNTIL } from '../referral/referral-credit.service.js';
 import { entryLabel } from './entry-labels.js';
-import { LedgerQuerySchema, WalletLedgerResponseSchema, type LedgerQuery } from './schemas.js';
+import {
+  LedgerQuerySchema,
+  WalletLedgerResponseSchema,
+  WalletResponseSchema,
+  type LedgerQuery,
+} from './schemas.js';
 
 const PROVIDER_LABELS: Record<string, string> = {
   tapjoy: 'Tapjoy',
   pubscale: 'PubScale',
+  adgate: 'AdGate',
+  adjoe: 'adjoe',
+  appsprize: 'AppsPrize',
 };
 
 function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider] ?? provider;
+}
+
+// A pending entry's release time, unless it is frozen for review (a placeholder far-future date the
+// app must not render as a countdown).
+function releaseAt(bucket: string, holdUntil: Date | null): string | null {
+  if (bucket !== 'pending' || !holdUntil || holdUntil >= FROZEN_HOLD_UNTIL) return null;
+  return holdUntil.toISOString();
 }
 
 export function registerWalletRoutes(
@@ -24,20 +40,38 @@ export function registerWalletRoutes(
 
   app.get(
     '/wallet',
-    { schema: { headers: AppHeadersSchema }, preHandler: authGuard },
+    {
+      schema: { headers: AppHeadersSchema, response: { 200: WalletResponseSchema } },
+      preHandler: authGuard,
+    },
     async (request, reply) => {
       if (!request.authUser) {
         throw new AppError('UNAUTHORIZED', 'Missing bearer token', 401);
       }
-      const wallet = await db
-        .selectFrom('wallets')
-        .select(['available_coin', 'pending_coin', 'lifetime_earned'])
-        .where('user_id', '=', request.authUser.sub)
-        .executeTakeFirst();
+      const userId = request.authUser.sub;
+      const [wallet, nextRelease] = await Promise.all([
+        db
+          .selectFrom('wallets')
+          .select(['available_coin', 'pending_coin', 'lifetime_earned'])
+          .where('user_id', '=', userId)
+          .executeTakeFirst(),
+        db
+          .selectFrom('coin_ledger')
+          .select((eb) => eb.fn.min('hold_until').as('at'))
+          .where('user_id', '=', userId)
+          .where('bucket', '=', 'pending')
+          .where('hold_until', 'is not', null)
+          .where('hold_until', '<', FROZEN_HOLD_UNTIL)
+          .executeTakeFirst(),
+      ]);
       if (!wallet) {
         throw new AppError('WALLET_NOT_FOUND', 'Wallet not found', 404);
       }
-      reply.code(200).send(wallet);
+      const at = nextRelease?.at;
+      reply.code(200).send({
+        ...wallet,
+        next_pending_release_at: at ? new Date(at).toISOString() : null,
+      });
     },
   );
 
@@ -87,6 +121,12 @@ export function registerWalletRoutes(
       if (request.query.provider) {
         query = query.where('earning_event.source', '=', request.query.provider);
       }
+      if (request.query.bucket === 'pending') {
+        // Released entries keep bucket='pending' but lose hold_until (see releaseHold).
+        query = query
+          .where('ledger.bucket', '=', 'pending')
+          .where('ledger.hold_until', 'is not', null);
+      }
 
       const rows = await query.execute();
       const hasMore = rows.length > limit;
@@ -116,6 +156,7 @@ export function registerWalletRoutes(
             balance_after: item.balance_after,
             note: item.note,
             created_at: item.created_at.toISOString(),
+            available_at: releaseAt(item.bucket, item.hold_until),
             offerwall: offerwallProvider
               ? {
                   provider: offerwallProvider,
@@ -123,7 +164,7 @@ export function registerWalletRoutes(
                   transaction_id: item.earning_transaction_id,
                   status: offerwallStatus,
                   available_at:
-                    offerwallStatus === 'pending' ? (item.hold_until?.toISOString() ?? null) : null,
+                    offerwallStatus === 'pending' ? releaseAt(item.bucket, item.hold_until) : null,
                 }
               : null,
           };

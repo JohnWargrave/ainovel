@@ -1560,11 +1560,13 @@ Response `200`:
 {
   "available_coin": "12500",
   "pending_coin": "3000",
-  "lifetime_earned": "48200"
+  "lifetime_earned": "48200",
+  "next_pending_release_at": "2026-10-16T03:21:09.000Z"
 }
 ```
 
-- Cả 3 field là **string**. Route này không khai báo response schema, nên server trả nguyên row DB (bigint ở dạng string).
+- 3 field coin là **string** (bigint).
+- `next_pending_release_at`: thời điểm sớm nhất một khoản đang chờ trở thành dùng được (dòng "available in 2 days" dưới số pending); `null` nếu không có khoản nào đang chờ có hạn. Khoản bị đóng băng chờ duyệt không được tính.
 - `lifetime_earned` là tổng mọi khoản đã cộng (cả available lẫn pending), không bị giảm khi tiêu coin.
 
 Lỗi:
@@ -1578,11 +1580,12 @@ Lịch sử biến động coin, mới nhất trước, phân trang bằng curso
 
 Query:
 
-| Tên        | Kiểu                       | Bắt buộc | Ràng buộc / ghi chú                                                                         |
-| ---------- | -------------------------- | -------- | ------------------------------------------------------------------------------------------- |
-| `limit`    | integer                    | không    | 1–100, mặc định 20                                                                          |
-| `cursor`   | string                     | không    | Lấy từ `next_cursor` của trang trước (là `id` của ledger entry, UUIDv7).                    |
-| `provider` | `"tapjoy"` \| `"pubscale"` | không    | Chỉ lấy các entry gắn với earning event của network này (dùng cho màn "Lịch sử offerwall"). |
+| Tên        | Kiểu                                                                   | Bắt buộc | Ràng buộc / ghi chú                                                                                                |
+| ---------- | ---------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `limit`    | integer                                                                | không    | 1–100, mặc định 20                                                                                                 |
+| `cursor`   | string                                                                 | không    | Lấy từ `next_cursor` của trang trước (là `id` của ledger entry, UUIDv7).                                           |
+| `provider` | `"tapjoy"` \| `"pubscale"` \| `"adgate"` \| `"adjoe"` \| `"appsprize"` | không    | Chỉ lấy các entry gắn với earning event của network này (dùng cho màn "Lịch sử offerwall").                        |
+| `bucket`   | `"pending"`                                                            | không    | Chỉ lấy coin **đang chờ** (tab "Pending"), mọi nguồn: offerwall, giới thiệu… Entry đã release không còn xuất hiện. |
 
 Response `200`:
 
@@ -1598,6 +1601,7 @@ Response `200`:
       "balance_after": "12500",
       "note": null,
       "created_at": "2026-10-14T03:21:09.000Z",
+      "available_at": "2026-10-17T03:21:09.000Z",
       "offerwall": {
         "provider": "tapjoy",
         "provider_label": "Tapjoy",
@@ -1615,6 +1619,7 @@ Response `200`:
       "balance_after": "12500",
       "note": "Daily check-in day 3",
       "created_at": "2026-10-14T01:00:00.000Z",
+      "available_at": null,
       "offerwall": null
     }
   ],
@@ -1627,6 +1632,7 @@ Ghi chú:
 - `amount` là **string có dấu**: khoản cộng thì dương, khoản trừ (`*_DEBIT`, `*_CLAWBACK`, dòng HOLD_RELEASE phía pending) thì **âm**, ví dụ `"-5000"`.
 - `balance_after` luôn là số dư **available** sau entry, kể cả khi entry thuộc bucket `pending`. Vì vậy với entry pending, `balance_after` không đổi so với entry trước.
 - `bucket`: `"available"` hoặc `"pending"`.
+- `available_at`: với mọi entry **đang chờ** (offerwall, giới thiệu…), thời điểm dự kiến coin dùng được; `null` khi đã dùng được, đã release, hoặc đang bị đóng băng chờ duyệt (khi đó app hiện "Đang xét duyệt").
 - `entry_label` là nhãn tiếng Anh do server sinh ra. Client mới nên hiển thị field này thay vì tự map `entry_type`. Loại không biết sẽ có nhãn `"Coin activity"`.
 - `offerwall` chỉ khác `null` với `OFFERWALL_CREDIT` / `OFFERWALL_CLAWBACK`:
   - `status`: `"reversed"` (clawback), `"pending"` (đang hold, khi đó `available_at` = thời điểm dự kiến release), `"available"` (đã release hoặc được cộng thẳng). Sau khi hold được release, entry gốc chuyển sang `status: "available"`, còn `bucket` của entry gốc **vẫn là `"pending"`** vì ledger là append-only.
@@ -1945,6 +1951,7 @@ Response `200`:
       "description": "Install apps & play games to earn coins",
       "icon_url": "https://cdn.example.com/offerwall/tapjoy.png",
       "badge_text": "HOT",
+      "reward_text": "Up to $15",
       "placement": "Offerwall"
     }
   ],
@@ -1970,6 +1977,7 @@ Response `200`:
 - `enabled: false` thì `offers` và `networks` đều rỗng, nên ẩn offerwall.
 - `offers[]`: thẻ launch do CMS quản lý (đã lọc theo trạng thái active, region và khung thời gian). `id` là mã thẻ, `provider` là id network dùng để chọn SDK, `placement` là chuỗi truyền vào SDK của provider đó để mở offerwall.
 - `networks[]`: field tương thích ngược cho client cũ. `deeplink_url` **luôn `null`** (deprecated).
+- `reward_text`: dòng mức thưởng trên thẻ (vd "Up to $15"), CMS nhập tự do; `null` thì ẩn dòng này.
 - `icon_url`, `badge_text`, `placement` có thể `null`. Khi `null`, app dùng giá trị hoặc asset mặc định có sẵn trong app.
 
 Lỗi:

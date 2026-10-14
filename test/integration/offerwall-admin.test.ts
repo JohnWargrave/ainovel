@@ -103,6 +103,7 @@ describe('offerwall CMS management', () => {
         provider: 'tapjoy',
         name: 'QA Tapjoy card',
         description: 'Complete tasks',
+        reward_text: 'Up to $15',
         region_ids: ['VN'],
         sort_order: 30,
         status: 'draft',
@@ -111,19 +112,25 @@ describe('offerwall CMS management', () => {
     expect(created.statusCode).toBe(200);
     const createdBody = created.json<OfferBody>();
     createdOfferIds.push(createdBody.id);
-    expect(createdBody).toMatchObject({ code, provider: 'tapjoy', status: 'draft' });
+    expect(createdBody).toMatchObject({
+      code,
+      provider: 'tapjoy',
+      status: 'draft',
+      reward_text: 'Up to $15',
+    });
 
     const updated = await app.inject({
       method: 'PATCH',
       url: `/admin/offerwall/offers/${createdBody.id}`,
       headers: adminHeaders(superadminId),
-      payload: { name: 'Featured Tapjoy', status: 'active', sort_order: 5 },
+      payload: { name: 'Featured Tapjoy', status: 'active', sort_order: 5, reward_text: null },
     });
     expect(updated.statusCode).toBe(200);
     expect(updated.json<OfferBody>()).toMatchObject({
       name: 'Featured Tapjoy',
       status: 'active',
       sort_order: 5,
+      reward_text: null,
     });
 
     const filtered = await app.inject({
