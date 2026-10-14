@@ -23,6 +23,7 @@ import { registerConfigAdminRoutes } from './modules/config/admin-routes.js';
 import { registerCoinRewardSettingsAdminRoutes } from './modules/config/coin-reward-settings-admin-routes.js';
 import { registerNovelRoutes } from './modules/novel/routes.js';
 import { registerNovelAdminRoutes } from './modules/novel/admin-routes.js';
+import { registerFeedbackAdminRoutes, registerFeedbackRoutes } from './modules/feedback/routes.js';
 import { registerInboxRoutes } from './modules/inbox/routes.js';
 import { registerFraudAdminRoutes } from './modules/fraud/admin-routes.js';
 import { registerAdminUsersRoutes } from './modules/admin/users-routes.js';
@@ -224,6 +225,8 @@ export async function buildApp(overrides?: BuildAppOverrides): Promise<FastifyIn
     registerDirectCoinAdminRoutes(target);
     registerNovelRoutes(target, { accessJwt: authDeps.accessJwt });
     registerNovelAdminRoutes(target);
+    registerFeedbackRoutes(target, { accessJwt: authDeps.accessJwt });
+    registerFeedbackAdminRoutes(target);
   };
 
   registerJsonApiRoutes(app);

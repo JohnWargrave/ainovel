@@ -382,6 +382,16 @@ interface RedemptionStatusHistoryTable {
   created_at: GeneratedTimestamp;
 }
 
+interface AppFeedbackTable {
+  id: string;
+  user_id: string;
+  rating: number;
+  message: string | null;
+  email: string | null;
+  app_version: string | null;
+  created_at: GeneratedTimestamp;
+}
+
 interface UserPreferencesTable {
   user_id: string;
   category_ids: Generated<string[]>;
@@ -631,6 +641,7 @@ export interface DB {
   admin_sessions: AdminSessionsTable;
   users: UsersTable;
   user_preferences: UserPreferencesTable;
+  app_feedback: AppFeedbackTable;
   devices: DevicesTable;
   user_identities: UserIdentitiesTable;
   password_credentials: PasswordCredentialsTable;

@@ -12,6 +12,7 @@ import { Redis } from 'ioredis';
 const DATA_TABLES = [
   'users',
   'user_preferences',
+  'app_feedback',
   'admin_sessions',
   'user_identities',
   'password_credentials',

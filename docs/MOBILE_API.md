@@ -20,6 +20,7 @@ Mọi field, mã lỗi và giới hạn trong tài liệu được lấy từ co
 11. [Vòng quay (Spin)](#11-vòng-quay-spin)
 12. [Giới thiệu bạn bè (Referral)](#12-giới-thiệu-bạn-bè-referral)
 13. [Đổi quà (Catalog & Redemption)](#13-đổi-quà-catalog--redemption)
+14. [Phản hồi & báo cáo](#14-phản-hồi--báo-cáo)
 
 ## 0. Quy ước chung
 
@@ -2492,3 +2493,34 @@ Lỗi:
   }
   ```
 - `429 RATE_LIMITED`: quá 5 lần/giờ cho đơn này. Rate limit được kiểm tra **trước** mọi điều kiện khác, nên các lần gọi bị 404/409 cũng bị tính vào quota.
+
+## 14. Phản hồi & báo cáo
+
+### `POST /feedback`
+
+Gửi đánh giá app từ màn "Rate the app". **Auth:** Bearer. **Headers:** App headers (`X-App-Version` được lưu kèm). **Rate limit:** 5 lần/giờ/user.
+
+Body:
+
+| Field     | Kiểu    | Bắt buộc | Ràng buộc                                                               |
+| --------- | ------- | -------- | ----------------------------------------------------------------------- |
+| `rating`  | integer | có       | 1–5 sao                                                                 |
+| `message` | string  | không    | ≤ 2000 ký tự. Chỉ có khoảng trắng thì coi như không có.                 |
+| `email`   | string  | không    | Email để đội ngũ trả lời, ≤ 254 ký tự, dạng `a@b.c`, không khoảng trắng |
+
+```json
+{ "rating": 4, "message": "Love the reader, wish it had dark mode", "email": "reader@example.com" }
+```
+
+Response `200`:
+
+```json
+{ "id": "0192fa00-0000-7000-8000-000000000001", "created_at": "2026-10-14T08:30:00.000Z" }
+```
+
+- Server chỉ lưu để đội ngũ đọc trong CMS; không có phản hồi tự động. Với 4–5 sao app có thể mở luôn trang đánh giá trên store.
+
+Lỗi:
+
+- `400 VALIDATION_ERROR` — `rating` ngoài 1–5, `message` quá dài, `email` sai định dạng.
+- `429 RATE_LIMITED` — quá 5 lần/giờ.

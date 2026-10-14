@@ -96,6 +96,12 @@ import {
 } from './format.js';
 import { getNovelSettings, updateNovelSettings, type NovelSettingsData } from './novels-api.js';
 import { loadNovelsPage, renderNovelsPage, resetNovelsState, type NovelsHost } from './novels.js';
+import {
+  loadFeedbackPage,
+  renderFeedbackPage,
+  resetFeedbackState,
+  type FeedbackHost,
+} from './feedback.js';
 
 type Page =
   | 'dashboard'
@@ -106,6 +112,7 @@ type Page =
   | 'referrals'
   | 'redemptions'
   | 'novels'
+  | 'feedback'
   | 'settings'
   | 'audit';
 type OfferwallTab = 'cards' | 'providers' | 'regions';
@@ -246,6 +253,7 @@ const ICON_PATHS: Record<string, string> = {
     'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
   audit:
     'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8',
+  feedback: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   fold: 'M3 6h18M3 12h12M3 18h18M21 9l-3 3 3 3',
   unfold: 'M3 6h18M9 12h12M3 18h18M3 9l3 3-3 3',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
@@ -264,6 +272,7 @@ const PAGE_META: Record<Page, { label: string; icon: string; group: string }> = 
   users: { label: 'Users', icon: 'users', group: 'Users & growth' },
   referrals: { label: 'Referrals', icon: 'referrals', group: 'Users & growth' },
   redemptions: { label: 'Redemptions', icon: 'redemptions', group: 'Users & growth' },
+  feedback: { label: 'Feedback', icon: 'feedback', group: 'Users & growth' },
   settings: { label: 'Settings', icon: 'settings', group: 'System' },
   audit: { label: 'Audit log', icon: 'audit', group: 'System' },
 };
@@ -284,6 +293,7 @@ function shell(content: string): string {
     'users',
     'referrals',
     'redemptions',
+    'feedback',
     'settings',
     'audit',
   ];
@@ -297,6 +307,7 @@ function shell(content: string): string {
           (page) =>
             (!['offers', 'settings'].includes(page) || role === 'superadmin') &&
             (page !== 'referrals' || role !== 'fulfillment') &&
+            (page !== 'feedback' || role !== 'fulfillment') &&
             (page !== 'novels' || role === 'analyst' || role === 'superadmin'),
         );
   const groups: Array<[string, Page[]]> = [];
@@ -413,6 +424,7 @@ function wireShell(): void {
       async () => {
         await logout();
         resetNovelsState();
+        resetFeedbackState();
       },
       () => ({
         session: null,
@@ -2673,6 +2685,13 @@ const novelsHost: NovelsHost = {
   role: () => state.session?.role,
 };
 
+const feedbackHost: FeedbackHost = {
+  root: appRoot,
+  shell,
+  wireShell,
+  setStatus: (next) => setState(next),
+};
+
 async function loadPage(page: Page): Promise<void> {
   setState({ loading: true, error: null });
   try {
@@ -2729,6 +2748,7 @@ async function loadPage(page: Page): Promise<void> {
       });
     }
     if (page === 'novels') await loadNovelsPage(novelsHost);
+    if (page === 'feedback') await loadFeedbackPage(feedbackHost);
     if (page === 'audit') setState({ audit: await listAuditLog({}), loading: false });
   } catch (error) {
     setState({ error: errorMessage(error), loading: false });
@@ -2756,6 +2776,7 @@ function render(): void {
       state.novelSettings ?? undefined,
     );
   if (state.page === 'novels') renderNovelsPage(novelsHost);
+  if (state.page === 'feedback') renderFeedbackPage(feedbackHost);
   if (state.page === 'audit') renderAudit(state.audit ?? undefined);
 }
 
