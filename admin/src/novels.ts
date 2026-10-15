@@ -2,11 +2,13 @@
 // reading stats. Kept out of main.ts, which hands it the shell and status plumbing through
 // NovelsHost so this module never imports main.ts back.
 import {
+  applyCoverCandidate,
   bulkChapters,
   bulkNovels,
   cancelImportJob,
   commitImportJob,
   createChapter,
+  createCoverJob,
   createImportJob,
   createNovel,
   createNovelCategory,
@@ -15,6 +17,7 @@ import {
   deleteNovelCategory,
   getChapter,
   getImportJob,
+  getLatestCoverJob,
   getNovel,
   getNovelStats,
   getTopNovels,
@@ -41,6 +44,7 @@ import {
   type ChapterInput,
   type ChapterRevision,
   type CommitImportInput,
+  type CoverJob,
   type ImportChapterPage,
   type ImportFormat,
   type ImportJob,
@@ -98,6 +102,12 @@ interface NovelsState {
   importNovelIndex: number;
   importChapters: ImportChapterPage | null;
   top: TopNovels | null;
+  // Latest AI cover job of the open novel, and the prompt the admin is typing for the next one
+  // (null until they touch it; the box then shows the last job's prompt). Kept here because every
+  // re-render rebuilds the sidebar.
+  coverJob: CoverJob | null;
+  coverPrompt: string | null;
+  coverPromptOpen: boolean;
 }
 
 function initialState(): NovelsState {
@@ -125,17 +135,26 @@ function initialState(): NovelsState {
     importNovelIndex: 0,
     importChapters: null,
     top: null,
+    coverJob: null,
+    coverPrompt: null,
+    coverPromptOpen: false,
   };
 }
 
 let ns: NovelsState = initialState();
 let host: NovelsHost | null = null;
 let pollTimer: number | undefined;
+// Separate from the import poll: a cover job and an import can both be running.
+let coverPollTimer: number | undefined;
+// A poll result that arrived while the prompt box had focus; applied on blur so a re-render never
+// yanks the caret out from under the admin.
+let coverRenderPending = false;
 
 const NOVEL_STATUSES = ['draft', 'published', 'hidden', 'archived'] as const;
 const COMPLETION_STATUSES = ['ongoing', 'completed', 'hiatus'] as const;
 const IMPORT_FORMATS: ImportFormat[] = ['epub', 'txt', 'md', 'docx', 'json', 'zip'];
 const IN_FLIGHT_IMPORT = ['queued', 'parsing', 'committing'];
+const IN_FLIGHT_COVER = ['queued', 'generating'];
 
 const BULK_NOVEL_ACTIONS: Array<[BulkNovelActionName, string]> = [
   ['publish', 'Publish'],
@@ -161,6 +180,7 @@ const BULK_CHAPTER_ACTIONS: Array<[BulkChapterActionName, string]> = [
 
 export function resetNovelsState(): void {
   window.clearTimeout(pollTimer);
+  window.clearTimeout(coverPollTimer);
   ns = initialState();
 }
 
@@ -258,8 +278,32 @@ async function openNovel(novelId: string): Promise<void> {
     ns.novelStats = null;
     ns.chapterQuery = { q: '' };
     ns.chapterHistory = [];
+    ns.coverPrompt = null;
+    ns.coverPromptOpen = false;
+    window.clearTimeout(coverPollTimer);
+    // Shows drafts an import queued too, not only jobs started from this page.
+    ns.coverJob = canEdit() ? (await getLatestCoverJob(novelId)).job : null;
     await chaptersRequest(novelId);
   });
+  scheduleCoverPoll();
+}
+
+function scheduleCoverPoll(): void {
+  window.clearTimeout(coverPollTimer);
+  const job = ns.coverJob;
+  if (!job || !IN_FLIGHT_COVER.includes(job.status)) return;
+  coverPollTimer = window.setTimeout(() => {
+    if (!host?.isActive() || ns.novel?.id !== job.novel_id) return;
+    void getLatestCoverJob(job.novel_id)
+      .then((next) => {
+        if (ns.novel?.id !== job.novel_id) return;
+        ns.coverJob = next.job;
+        if (document.activeElement?.id === 'coverPrompt') coverRenderPending = true;
+        else rerender();
+        scheduleCoverPoll();
+      })
+      .catch((error: unknown) => host?.setStatus({ error: errorMessage(error) }));
+  }, 2000);
 }
 
 async function refreshList(): Promise<void> {
@@ -637,6 +681,53 @@ function novelInputFromForm(form: HTMLFormElement): NovelInput {
   };
 }
 
+const COVER_STATUS_CLASS: Record<string, string> = {
+  queued: 'queued',
+  generating: 'parsing',
+  ready: 'ready',
+  applied: 'done',
+  failed: 'failed',
+  cancelled: 'cancelled',
+};
+
+function coverAiPanel(): string {
+  const job = ns.coverJob;
+  const running = job !== null && IN_FLIGHT_COVER.includes(job.status);
+  const prompt = ns.coverPrompt ?? job?.prompt ?? '';
+  const pending = running ? 4 - job.candidates.length : 0;
+  return `<div class="cover-ai">
+      <button type="button" id="generateCover" ${running ? 'disabled' : ''}>${running ? 'Generating…' : job ? 'Generate 4 more' : 'Generate AI cover'}</button>
+      <details id="coverPromptDetails" ${ns.coverPromptOpen ? 'open' : ''}>
+        <summary>Image prompt</summary>
+        <textarea id="coverPrompt" rows="6" maxlength="2000" placeholder="Leave empty and the AI writes one from the description and first chapters.">${escapeHtml(prompt)}</textarea>
+        <small class="muted">${ns.coverPrompt === null ? 'Left as is, the AI writes a fresh prompt each time.' : 'Your prompt is used as written. Clear it to let the AI write one.'} English works best; never ask for text in the image, the title is added after.</small>
+      </details>
+      ${
+        job
+          ? `<div class="cover-ai-status"><span class="pill import-status-${COVER_STATUS_CLASS[job.status] ?? 'queued'}">${escapeHtml(job.status)}</span>${job.trigger === 'import' ? '<small class="muted">Drafted on import</small>' : ''}</div>
+      ${job.errors.length > 0 ? `<small class="cover-ai-error">${escapeHtml(job.errors[0])}${job.errors.length > 1 ? ` (+${String(job.errors.length - 1)})` : ''}</small>` : ''}
+      ${
+        job.candidates.length > 0 || pending > 0
+          ? `<div class="cover-candidates">
+        ${job.candidates
+          .map(
+            (
+              candidate,
+            ) => `<figure class="cover-candidate ${candidate.applied_at ? 'applied' : ''}">
+          <a href="${escapeHtml(candidate.url)}" target="_blank" rel="noopener"><img src="${escapeHtml(candidate.url)}" alt="Candidate ${String(candidate.idx + 1)}" loading="lazy" /></a>
+          ${candidate.applied_at ? '<span class="pill import-status-done">In use</span>' : `<button type="button" class="secondary" data-apply-cover="${escapeHtml(candidate.id)}">Use this</button>`}
+        </figure>`,
+          )
+          .join('')}
+        ${'<figure class="cover-candidate placeholder"><span>…</span></figure>'.repeat(pending)}
+      </div>`
+          : ''
+      }`
+          : ''
+      }
+    </div>`;
+}
+
 function novelSidebar(novel: AdminNovel): string {
   return `<aside class="novel-side">
     <article class="panel">
@@ -648,7 +739,8 @@ function novelSidebar(novel: AdminNovel): string {
         <input name="file" type="file" accept="image/jpeg,image/png,image/webp" required />
         <button type="submit" class="secondary">Upload cover</button>
         <small class="muted">JPEG, PNG or WebP, up to 5 MB.</small>
-      </form>`
+      </form>
+      ${coverAiPanel()}`
           : ''
       }
     </article>
@@ -857,6 +949,37 @@ function wireNovelDetail(): void {
     if (!(file instanceof File) || file.size === 0) return;
     void run(async () => {
       ns.novel = await uploadNovelCover(novel.id, file);
+    });
+  });
+  const coverPrompt = document.querySelector<HTMLTextAreaElement>('#coverPrompt');
+  coverPrompt?.addEventListener('input', () => {
+    ns.coverPrompt = coverPrompt.value;
+  });
+  coverPrompt?.addEventListener('blur', () => {
+    if (!coverRenderPending) return;
+    coverRenderPending = false;
+    rerender();
+  });
+  document
+    .querySelector<HTMLDetailsElement>('#coverPromptDetails')
+    ?.addEventListener('toggle', (event) => {
+      ns.coverPromptOpen = (event.currentTarget as HTMLDetailsElement).open;
+    });
+  document.querySelector<HTMLButtonElement>('#generateCover')?.addEventListener('click', () => {
+    // Only a prompt the admin edited is sent; an untouched box means "write me a new one".
+    const prompt = ns.coverPrompt?.trim();
+    void run(async () => {
+      ns.coverJob = await createCoverJob(novel.id, prompt);
+    }).then(scheduleCoverPoll);
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-apply-cover]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const candidateId = button.dataset['applyCover'];
+      if (!candidateId) return;
+      void run(async () => {
+        ns.novel = await applyCoverCandidate(candidateId);
+        ns.coverJob = (await getLatestCoverJob(novel.id)).job;
+      });
     });
   });
   document.querySelector<HTMLButtonElement>('#deleteNovel')?.addEventListener('click', () => {

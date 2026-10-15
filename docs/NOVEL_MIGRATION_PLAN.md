@@ -81,6 +81,24 @@ Cấu trúc theo mẫu catalog/drama: `routes.ts`, `schemas.ts`, `novel.service.
 - Upload qua backend: validate MIME (jpeg/png/webp) + kích thước (≤ 5MB), key `covers/{novel_id}/{uuid}.{ext}`.
 - Thêm `docker-compose.yml` service MinIO cho dev.
 
+### Ảnh bìa AI — `cover-ai/` (migration 079)
+- Nút **"Generate AI cover"** trong panel ảnh bìa của CMS tạo một job `novel_cover_jobs`, đưa vào BullMQ queue `novel-cover` và chạy ở worker:
+  1. **Brief:** DeepSeek (`COVER_AI_BRIEF_MODEL`, mặc định `deepseek-flash`, API OpenAI-compatible, JSON mode) đọc tên truyện, tác giả, mô tả, thể loại, tags và khoảng 6.000 ký tự đầu của 2 chương đầu, rồi trả về brief JSON tiếng Anh. DeepSeek không có API sinh ảnh nên bước vẽ vẫn dùng Workers AI.
+     - Quy tắc: ảnh không có chữ, phong cách theo thể loại, không nội dung nhạy cảm, chừa trống 1/3 dưới cho tiêu đề.
+     - Nếu admin tự gõ prompt thì bỏ qua bước này.
+  2. **Render:** Workers AI FLUX.2 (`COVER_AI_IMAGE_MODEL`, mặc định `@cf/black-forest-labs/flux-2-klein-4b`), gọi REST multipart, khổ 832×1248, 4 seed ngẫu nhiên, gọi tuần tự.
+     - Ảnh nào xong thì lưu ngay (`novel_cover_candidates`).
+     - Job chỉ `failed` khi cả 4 lần đều lỗi.
+  3. **Ghép chữ:** `sharp` thêm dải tối, tên truyện và tác giả bằng font Be Vietnam Pro đi kèm (`assets/fonts/`, để hiện đúng dấu tiếng Việt).
+     - Lưu 2 bản WebP: `covers/candidates/{job}/{i}.webp` có chữ và `{i}-clean.webp` không chữ.
+- Bìa **chỉ đổi khi editor chọn**: candidate được copy sang `covers/{novel}/{uuid}.webp`, sau đó gọi `setNovelCover` và ghi audit `NOVEL_COVER_AI_APPLIED`; bìa cũ bị xoá.
+- Mỗi truyện chỉ có 1 job đang chạy (`409 COVER_JOB_IN_PROGRESS`).
+  - Job kẹt quá 15 phút được đánh dấu `failed` ở lần tạo job kế tiếp.
+  - Giới hạn 30 job/giờ cho mỗi admin.
+  - Thiếu `DEEPSEEK_API_KEY` hoặc `CLOUDFLARE_AI_API_TOKEN` thì trả 503 `COVER_AI_NOT_CONFIGURED`.
+- Bật `COVER_AI_AUTO_ON_IMPORT=true` để commit import tự tạo job nháp cho các truyện mới chưa có bìa (EPUB/ZIP có bìa thì bỏ qua).
+- R2: thêm lifecycle rule xoá prefix `covers/candidates/` sau 7 ngày.
+
 ### Import (`import/`)
 - Thêm `@fastify/multipart` (đăng ký chỉ trong scope admin, giới hạn 50MB/file), file gốc lưu S3 `imports/{job_id}`.
 - Luồng 2 bước (theo mẫu staging của catalog `src/modules/catalog/catalog.service.ts:332-457`):
@@ -101,6 +119,10 @@ Cấu trúc theo mẫu catalog/drama: `routes.ts`, `schemas.ts`, `novel.service.
 ### Admin API (`admin-routes.ts`)
 Theo mẫu `src/modules/catalog/admin-routes.ts`: `createAdminGuard(roles)` + `createAdminCsrfGuard()` (`src/plugins/admin-guard.ts`) cho mọi mutation, TypeBox schema, keyset pagination, audit log `NOVEL_*` vào `audit_log`, `AppError` cho lỗi.
 - Novels: list (lọc/tìm/sort), get, create, update, delete (soft → `archived`), bulk (publish/hide/archive/gán category/set featured), upload cover.
+- Ảnh bìa AI (editor/superadmin):
+  - `POST /admin/novels/:id/cover-jobs` với body `{prompt?}`, trả 202 kèm job.
+  - `GET /admin/novels/:id/cover-jobs/latest` trả `{job}`, trong đó có danh sách candidates (`url`, `clean_url`, `applied_at`).
+  - `POST /admin/novel-cover-candidates/:id/apply` trả novel.
 - Chapters: list (TOC), get, create, update (ghi revision), delete, reorder/renumber, bulk set VIP/giá/publish, xem revisions + khôi phục.
 - Categories: CRUD + sắp xếp.
 - Imports: tạo, list, get (preview + lỗi), commit, huỷ.

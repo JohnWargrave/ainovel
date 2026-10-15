@@ -4,6 +4,7 @@ import { Type } from '@sinclair/typebox';
 import { uuidv7 } from 'uuidv7';
 import { createAdminCsrfGuard, createAdminGuard } from '../../plugins/admin-guard.js';
 import { AppError } from '../../lib/errors.js';
+import { checkSubjectRateLimit } from '../../lib/rate-limit.js';
 import type { NovelImportFormat, NovelImportMode } from '../../db/types.js';
 import {
   AdminCategoryListSchema,
@@ -72,6 +73,13 @@ import {
   updateNovel,
   type NovelActor,
 } from './admin.service.js';
+import {
+  CoverJobSchema,
+  CreateCoverJobSchema,
+  LatestCoverJobSchema,
+  type CreateCoverJobInput,
+} from './cover-ai/schemas.js';
+import { applyCoverCandidate, createCoverJob, getLatestCoverJob } from './cover-ai/service.js';
 import { listNovelSettings, updateNovelSettings } from './settings.service.js';
 import { getNovelStats, getTopNovels } from './stats.service.js';
 import { detectImageType, getObjectStorage } from './storage.js';
@@ -524,6 +532,50 @@ export function registerNovelAdminRoutes(app: FastifyInstance): void {
     },
     async (request, reply) => {
       reply.send(await cancelImportJob(request.params.id, requireAdmin(request), request.ip));
+    },
+  );
+
+  // ---- AI covers ----
+  // Four candidates per job, rendered in the worker; the cover only changes on apply.
+  app.post<{ Params: IdParams; Body: CreateCoverJobInput }>(
+    '/admin/novels/:id/cover-jobs',
+    {
+      preHandler: [contentGuard, csrf],
+      schema: {
+        params: IdParamsSchema,
+        body: CreateCoverJobSchema,
+        response: { 202: CoverJobSchema },
+      },
+    },
+    async (request, reply) => {
+      const actor = requireAdmin(request);
+      // Each job is one LLM call and four paid renders.
+      await checkSubjectRateLimit('cover-ai', actor.id, 3600, 30);
+      // Blank after trimming means "let the LLM write it"; createCoverJob treats '' as absent.
+      const prompt = request.body.prompt?.trim();
+      reply.code(202).send(await createCoverJob(request.params.id, actor, 'manual', prompt));
+    },
+  );
+
+  app.get<{ Params: IdParams }>(
+    '/admin/novels/:id/cover-jobs/latest',
+    {
+      preHandler: contentGuard,
+      schema: { params: IdParamsSchema, response: { 200: LatestCoverJobSchema } },
+    },
+    async (request, reply) => {
+      reply.send(await getLatestCoverJob(request.params.id));
+    },
+  );
+
+  app.post<{ Params: IdParams }>(
+    '/admin/novel-cover-candidates/:id/apply',
+    {
+      preHandler: [contentGuard, csrf],
+      schema: { params: IdParamsSchema, response: { 200: AdminNovelSchema } },
+    },
+    async (request, reply) => {
+      reply.send(await applyCoverCandidate(request.params.id, requireAdmin(request), request.ip));
     },
   );
 

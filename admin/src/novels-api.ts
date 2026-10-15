@@ -351,6 +351,48 @@ export function uploadNovelCover(novelId: string, file: File): Promise<AdminNove
   return api<AdminNovel>(`/admin/novels/${id(novelId)}/cover`, { method: 'POST', body });
 }
 
+// ---- AI covers ----
+
+export interface CoverCandidate {
+  id: string;
+  idx: number;
+  url: string;
+  clean_url: string;
+  applied_at: string | null;
+}
+
+export interface CoverJob {
+  id: string;
+  novel_id: string;
+  // queued | generating | ready | failed | applied | cancelled
+  status: string;
+  trigger: string;
+  prompt: string | null;
+  model: string | null;
+  errors: string[];
+  created_at: string;
+  finished_at: string | null;
+  candidates: CoverCandidate[];
+}
+
+// Without a prompt the server has an LLM write one from the novel's description and opening.
+export function createCoverJob(novelId: string, prompt?: string): Promise<CoverJob> {
+  return api<CoverJob>(`/admin/novels/${id(novelId)}/cover-jobs`, {
+    method: 'POST',
+    body: JSON.stringify(prompt ? { prompt } : {}),
+  });
+}
+
+export function getLatestCoverJob(novelId: string): Promise<{ job: CoverJob | null }> {
+  return api<{ job: CoverJob | null }>(`/admin/novels/${id(novelId)}/cover-jobs/latest`);
+}
+
+export function applyCoverCandidate(candidateId: string): Promise<AdminNovel> {
+  return api<AdminNovel>(`/admin/novel-cover-candidates/${id(candidateId)}/apply`, {
+    method: 'POST',
+  });
+}
+
 // Plain links: the browser sends the session cookie and saves the attachment itself.
 export function novelExportUrl(novelId: string, format: ExportFormat): string {
   return `/admin/novels/${id(novelId)}/export?format=${format}`;

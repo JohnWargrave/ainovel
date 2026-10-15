@@ -55,6 +55,7 @@
     "node-pg-migrate": "^7.9.1",
     "pg": "^8.13.1",
     "pino": "^9.5.0",
+    "sharp": "^0.35.5",
     "uuidv7": "^1.0.2"
   },
   "devDependencies": {

@@ -1959,6 +1959,65 @@ dialog h3 {
   place-items: center;
 }
 
+.cover-ai {
+  display: grid;
+  gap: var(--space-sm);
+  margin-top: var(--space);
+  padding-top: var(--space);
+  border-top: 1px solid var(--color-border-secondary);
+}
+
+.cover-ai textarea {
+  width: 100%;
+  margin-top: var(--space-sm);
+  font-size: 0.85rem;
+}
+
+.cover-ai-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.cover-ai-error {
+  color: var(--color-error-text);
+}
+
+.cover-candidates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.cover-candidate {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  justify-items: center;
+}
+
+.cover-candidate img,
+.cover-candidate.placeholder span {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border: 2px solid var(--color-border-secondary);
+  border-radius: var(--radius);
+  object-fit: cover;
+}
+
+.cover-candidate.placeholder span {
+  display: grid;
+  place-items: center;
+  border-style: dashed;
+  background: var(--color-fill-alter);
+  color: var(--color-text-tertiary);
+}
+
+.cover-candidate.applied img {
+  border-color: var(--color-success-border);
+}
+
 img.novel-cover-large {
   border-style: solid;
   border-color: var(--color-border-secondary);

@@ -54,6 +54,16 @@ const EnvSchema = Type.Object({
   S3_FORCE_PATH_STYLE: Type.Boolean({ default: false }),
   // Public (CDN) base URL objects are served from, e.g. https://cdn.example.com.
   S3_PUBLIC_BASE_URL: Type.Optional(Type.String()),
+  // AI cover generation (CMS "Generate AI cover"). DeepSeek writes the art brief (it has no image
+  // API); the Cloudflare token (Workers AI permission, separate from the email one) renders it with
+  // FLUX. Optional: without both the feature answers 503 COVER_AI_NOT_CONFIGURED.
+  CLOUDFLARE_AI_API_TOKEN: Type.Optional(Type.String()),
+  DEEPSEEK_API_KEY: Type.Optional(Type.String()),
+  DEEPSEEK_BASE_URL: Type.String({ default: 'https://api.deepseek.com' }),
+  COVER_AI_IMAGE_MODEL: Type.String({ default: '@cf/black-forest-labs/flux-2-klein-4b' }),
+  COVER_AI_BRIEF_MODEL: Type.String({ default: 'deepseek-flash' }),
+  // Draft covers for imported novels that arrive without one (they still wait for an admin pick).
+  COVER_AI_AUTO_ON_IMPORT: Type.Boolean({ default: false }),
   // Base of the invite link GET /referral hands the app to share (the code is appended as /{code}).
   // Optional: without a registered deeplink/landing page there is no correct value, and the field is
   // omitted from the response rather than emitting a link that goes nowhere.
@@ -111,6 +121,12 @@ export function loadEnv(source: NodeJS.ProcessEnv): Env {
     S3_ACCESS_KEY_ID: source['S3_ACCESS_KEY_ID'],
     S3_SECRET_ACCESS_KEY: source['S3_SECRET_ACCESS_KEY'],
     S3_FORCE_PATH_STYLE: source['S3_FORCE_PATH_STYLE'] === 'true',
+    CLOUDFLARE_AI_API_TOKEN: source['CLOUDFLARE_AI_API_TOKEN'],
+    DEEPSEEK_API_KEY: source['DEEPSEEK_API_KEY'],
+    DEEPSEEK_BASE_URL: source['DEEPSEEK_BASE_URL'],
+    COVER_AI_IMAGE_MODEL: source['COVER_AI_IMAGE_MODEL'],
+    COVER_AI_BRIEF_MODEL: source['COVER_AI_BRIEF_MODEL'],
+    COVER_AI_AUTO_ON_IMPORT: source['COVER_AI_AUTO_ON_IMPORT'] === 'true',
     S3_PUBLIC_BASE_URL: source['S3_PUBLIC_BASE_URL'],
     REFERRAL_SHARE_BASE_URL: source['REFERRAL_SHARE_BASE_URL'],
     NOVEL_SHARE_BASE_URL: source['NOVEL_SHARE_BASE_URL'],

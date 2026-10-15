@@ -31,5 +31,7 @@ ENV NODE_ENV=production
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/src/db/migrations ./src/db/migrations
+# Fonts the AI cover compositor draws titles with (resolved relative to dist/).
+COPY --from=build /app/assets ./assets
 COPY package.json ./
 CMD ["node", "dist/worker.js"]

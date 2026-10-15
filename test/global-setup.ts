@@ -35,6 +35,8 @@ const DATA_TABLES = [
   'audit_log',
   'inbox_messages',
   'catalog_staging',
+  'novel_cover_candidates',
+  'novel_cover_jobs',
   'novel_import_chapters',
   'novel_import_jobs',
   'novel_read_progress',

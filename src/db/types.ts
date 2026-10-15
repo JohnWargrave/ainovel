@@ -551,13 +551,7 @@ interface NovelLibraryTable {
 export type NovelImportFormat = 'epub' | 'txt' | 'md' | 'docx' | 'json' | 'zip';
 export type NovelImportMode = 'new' | 'append' | 'replace';
 export type NovelImportStatus =
-  | 'queued'
-  | 'parsing'
-  | 'ready'
-  | 'committing'
-  | 'done'
-  | 'failed'
-  | 'cancelled';
+  'queued' | 'parsing' | 'ready' | 'committing' | 'done' | 'failed' | 'cancelled';
 
 interface NovelImportJobsTable {
   id: string;
@@ -586,6 +580,34 @@ interface NovelImportChaptersTable {
   content: string;
   word_count: number;
   warnings: Generated<string[]>;
+}
+
+export type NovelCoverJobStatus =
+  'queued' | 'generating' | 'ready' | 'failed' | 'applied' | 'cancelled';
+
+interface NovelCoverJobsTable {
+  id: string;
+  novel_id: string;
+  status: Generated<NovelCoverJobStatus>;
+  trigger: 'manual' | 'import';
+  brief: unknown;
+  prompt: string | null;
+  model: string | null;
+  admin_user_id: string | null;
+  errors: unknown;
+  created_at: GeneratedTimestamp;
+  finished_at: Timestamp | null;
+}
+
+interface NovelCoverCandidatesTable {
+  id: string;
+  job_id: string;
+  idx: number;
+  seed: Bigint;
+  image_key: string;
+  clean_key: string;
+  created_at: GeneratedTimestamp;
+  applied_at: Timestamp | null;
 }
 
 interface SpinConfigTable {
@@ -688,6 +710,8 @@ export interface DB {
   novel_library: NovelLibraryTable;
   novel_import_jobs: NovelImportJobsTable;
   novel_import_chapters: NovelImportChaptersTable;
+  novel_cover_jobs: NovelCoverJobsTable;
+  novel_cover_candidates: NovelCoverCandidatesTable;
   spin_config: SpinConfigTable;
   spin_history: SpinHistoryTable;
   user_boosts: UserBoostsTable;

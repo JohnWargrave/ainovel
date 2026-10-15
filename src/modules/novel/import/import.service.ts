@@ -11,6 +11,7 @@ import {
   refreshNovelCounters,
   type NovelActor,
 } from '../admin.service.js';
+import { draftCoversForImport } from '../cover-ai/service.js';
 import { getObjectStorage } from '../storage.js';
 import { countWords } from '../text.js';
 import { chapterWarnings, formatFromFilename, parseImport } from './parsers.js';
@@ -498,7 +499,9 @@ export async function commitImportJob(
       .execute();
     throw err;
   }
-  return getImportJob(jobId);
+  const committed = await getImportJob(jobId);
+  await draftCoversForImport(committed.result_novel_ids);
+  return committed;
 }
 
 export async function cancelImportJob(
