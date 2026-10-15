@@ -8,6 +8,7 @@ import { env } from '../../src/config/env.js';
 import { db } from '../../src/db/index.js';
 import { MemoryObjectStorage, setObjectStorage } from '../../src/modules/novel/storage.js';
 import {
+  fallbackBrief,
   getCoverBriefWriter,
   setCoverBriefWriter,
   type CoverBrief,
@@ -391,11 +392,28 @@ describe('DeepSeek brief writer', () => {
     tags: [],
     excerpt: 'Lâm Phong rút kiếm.',
   };
-  const reply = (content: string | null, finishReason = 'stop', status = 200): Response =>
-    new Response(
-      JSON.stringify({ choices: [{ finish_reason: finishReason, message: { content } }] }),
-      { status, headers: { 'content-type': 'application/json' } },
-    );
+  // An SSE body the way DeepSeek streams it: keep-alive comments, then content deltas.
+  const stream = (content: string | null, finishReason = 'stop', status = 200): Response => {
+    if (status !== 200) {
+      return new Response(JSON.stringify({ error: { message: 'nope' } }), { status });
+    }
+    const half = content ? Math.ceil(content.length / 2) : 0;
+    const events = [
+      ': keep-alive\n\n',
+      ...(content
+        ? [content.slice(0, half), content.slice(half)].map(
+            (part) =>
+              `data: ${JSON.stringify({ choices: [{ delta: { content: part }, finish_reason: null }] })}\n\n`,
+          )
+        : []),
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] })}\n\n`,
+      'data: [DONE]\n\n',
+    ];
+    return new Response(events.join(''), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  };
 
   beforeAll(() => {
     env.DEEPSEEK_API_KEY = 'test-deepseek-key';
@@ -403,13 +421,14 @@ describe('DeepSeek brief writer', () => {
   });
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
   afterAll(() => {
     delete env.DEEPSEEK_API_KEY;
   });
 
-  it('asks for JSON without thinking and returns the brief', async () => {
-    const fetchMock = vi.fn(() => Promise.resolve(reply(JSON.stringify(BRIEF))));
+  it('streams a JSON answer without thinking and returns the brief', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(stream(JSON.stringify(BRIEF))));
     vi.stubGlobal('fetch', fetchMock);
     await expect(getCoverBriefWriter().write(input)).resolves.toEqual(BRIEF);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -420,6 +439,7 @@ describe('DeepSeek brief writer', () => {
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body).toMatchObject({
       model: 'deepseek-flash',
+      stream: true,
       thinking: { type: 'disabled' },
       response_format: { type: 'json_object' },
     });
@@ -429,28 +449,95 @@ describe('DeepSeek brief writer', () => {
   it('retries an empty JSON-mode answer once', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(reply(''))
-      .mockResolvedValueOnce(reply(JSON.stringify(BRIEF)));
+      .mockResolvedValueOnce(stream(''))
+      .mockResolvedValueOnce(stream(JSON.stringify(BRIEF)));
     vi.stubGlobal('fetch', fetchMock);
     await expect(getCoverBriefWriter().write(input)).resolves.toEqual(BRIEF);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('maps a content filter to a 422 and an auth error to a 502 without retrying', async () => {
+  it('maps a content filter to a 422 and an HTTP error to a 502 without retrying', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(() => Promise.resolve(reply(null, 'content_filter'))),
+      vi.fn(() => Promise.resolve(stream(null, 'content_filter'))),
     );
     await expect(getCoverBriefWriter().write(input)).rejects.toMatchObject({
       code: 'COVER_AI_BRIEF_REFUSED',
       statusCode: 422,
     });
-    const unauthorized = vi.fn(() => Promise.resolve(reply(null, 'stop', 401)));
+    const unauthorized = vi.fn(() => Promise.resolve(stream(null, 'stop', 401)));
     vi.stubGlobal('fetch', unauthorized);
     await expect(getCoverBriefWriter().write(input)).rejects.toMatchObject({
       code: 'COVER_AI_BRIEF_FAILED',
       statusCode: 502,
+      message: expect.stringContaining('HTTP 401') as unknown,
     });
     expect(unauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up with a timeout when DeepSeek only sends keep-alives', async () => {
+    vi.useFakeTimers();
+    // Never-ending keep-alive stream that honours the abort signal, like a queued request.
+    const hanging = vi.fn((_url: string, init: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(': keep-alive\n\n'));
+          init.signal?.addEventListener('abort', () => {
+            controller.error(new DOMException('aborted', 'AbortError'));
+          });
+        },
+      });
+      return Promise.resolve(new Response(body, { status: 200 }));
+    });
+    vi.stubGlobal('fetch', hanging);
+    const result = getCoverBriefWriter().write(input);
+    const assertion = expect(result).rejects.toMatchObject({
+      code: 'COVER_AI_BRIEF_TIMEOUT',
+      statusCode: 504,
+    });
+    await vi.advanceTimersByTimeAsync(91_000);
+    await assertion;
+    expect(hanging).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to a genre-based prompt and still renders covers', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(stream(null, 'stop', 503))),
+    );
+    const generator = new FakeGenerator();
+    setCoverImageGenerator(generator);
+    const novelId = uuidv7();
+    await db
+      .insertInto('novels')
+      .values({ id: novelId, slug: `fallback-${novelId}`, title: 'Kiếm Đạo' })
+      .execute();
+    const jobId = uuidv7();
+    await db
+      .insertInto('novel_cover_jobs')
+      .values({ id: jobId, novel_id: novelId, trigger: 'manual' })
+      .execute();
+    setObjectStorage(new MemoryObjectStorage());
+    try {
+      await processCoverJob(jobId);
+    } finally {
+      setObjectStorage(null);
+      setCoverImageGenerator(null);
+    }
+    const job = await db
+      .selectFrom('novel_cover_jobs')
+      .select(['status', 'errors', 'prompt'])
+      .where('id', '=', jobId)
+      .executeTakeFirstOrThrow();
+    expect(job.status).toBe('ready');
+    expect(job.prompt).toContain('no text, no lettering');
+    expect((job.errors as string[])[0]).toContain('genre-based prompt');
+    expect(generator.calls).toHaveLength(4);
+  });
+
+  it('picks the style from the genre', () => {
+    expect(fallbackBrief(input).prompt).toContain('ink-and-color');
+    expect(fallbackBrief({ ...input, genres: ['Ngôn tình'] }).prompt).toContain('romance');
+    expect(fallbackBrief({ ...input, genres: [] }).prompt).toContain('no text');
   });
 });

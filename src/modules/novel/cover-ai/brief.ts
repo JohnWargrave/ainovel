@@ -53,9 +53,20 @@ Answer with a single JSON object and nothing else, every value an English string
 // Enough of the opening to find the protagonist and the first set piece; covers don't need more.
 export const EXCERPT_CHARS = 6000;
 
-interface ChatCompletion {
-  choices?: { finish_reason?: string; message?: { content?: string | null } }[];
+// Streamed so a model that is merely slow (it sends `: keep-alive` lines while queued) can be told
+// apart from one that is down, and so the wait is bounded by our clock rather than DeepSeek's.
+// Under load DeepSeek has been seen holding requests for minutes before the first token.
+const FIRST_TOKEN_TIMEOUT_MS = 90_000;
+const TOTAL_TIMEOUT_MS = 180_000;
+
+interface StreamChunk {
+  choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[];
   error?: { message?: string };
+}
+
+interface StreamResult {
+  content: string;
+  finishReason: string | null;
 }
 
 function parseBrief(content: string | null | undefined): CoverBrief | null {
@@ -74,27 +85,39 @@ function parseBrief(content: string | null | undefined): CoverBrief | null {
   ) as unknown as CoverBrief;
 }
 
-// DeepSeek's OpenAI-compatible chat API in JSON mode. Thinking is off: the brief is a short
-// creative rewrite, and reasoning would only add latency and tokens.
+function novelText(input: CoverBriefInput): string {
+  return [
+    `Title: ${input.title}`,
+    input.author ? `Author: ${input.author}` : null,
+    input.genres.length > 0 ? `Genres: ${input.genres.join(', ')}` : null,
+    input.tags.length > 0 ? `Tags: ${input.tags.join(', ')}` : null,
+    input.description ? `Description:\n${input.description}` : null,
+    input.excerpt ? `Opening chapters (excerpt):\n${input.excerpt}` : null,
+  ]
+    .filter((line) => line !== null)
+    .join('\n\n');
+}
+
+// DeepSeek's OpenAI-compatible chat API in JSON mode, streamed. Thinking is off: the brief is a
+// short creative rewrite, and reasoning would only add latency and tokens.
 class DeepSeekCoverBriefWriter implements CoverBriefWriter {
   constructor(private readonly apiKey: string) {}
 
-  async write(input: CoverBriefInput): Promise<CoverBrief> {
-    const novel = [
-      `Title: ${input.title}`,
-      input.author ? `Author: ${input.author}` : null,
-      input.genres.length > 0 ? `Genres: ${input.genres.join(', ')}` : null,
-      input.tags.length > 0 ? `Tags: ${input.tags.join(', ')}` : null,
-      input.description ? `Description:\n${input.description}` : null,
-      input.excerpt ? `Opening chapters (excerpt):\n${input.excerpt}` : null,
-    ]
-      .filter((line) => line !== null)
-      .join('\n\n');
-
-    // JSON mode occasionally answers with empty content (a known DeepSeek issue); one retry
-    // covers it without making a real outage wait twice as long.
-    let lastFailure: Record<string, unknown> = {};
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+  private async complete(novel: string): Promise<StreamResult> {
+    const controller = new AbortController();
+    // An object, not a `let`: TypeScript can't see the timer callbacks assign it.
+    const timeout: { reason: 'first_token' | 'total' | null } = { reason: null };
+    const abort = (reason: 'first_token' | 'total'): void => {
+      timeout.reason = reason;
+      controller.abort();
+    };
+    const firstTokenTimer = setTimeout(() => {
+      abort('first_token');
+    }, FIRST_TOKEN_TIMEOUT_MS);
+    const totalTimer = setTimeout(() => {
+      abort('total');
+    }, TOTAL_TIMEOUT_MS);
+    try {
       const response = await fetch(
         `${env.DEEPSEEK_BASE_URL.replace(/\/+$/u, '')}/chat/completions`,
         {
@@ -105,6 +128,7 @@ class DeepSeekCoverBriefWriter implements CoverBriefWriter {
           },
           body: JSON.stringify({
             model: env.COVER_AI_BRIEF_MODEL,
+            stream: true,
             thinking: { type: 'disabled' },
             response_format: { type: 'json_object' },
             max_tokens: 1500,
@@ -116,35 +140,147 @@ class DeepSeekCoverBriefWriter implements CoverBriefWriter {
               },
             ],
           }),
-          signal: AbortSignal.timeout(60_000),
+          signal: controller.signal,
         },
       );
-      const body = (await response.json().catch(() => ({}))) as ChatCompletion;
-      const choice = body.choices?.[0];
-      if (choice?.finish_reason === 'content_filter') {
+      if (!response.ok || !response.body) {
+        const body = (await response.json().catch(() => ({}))) as StreamChunk;
+        throw new AppError(
+          'COVER_AI_BRIEF_FAILED',
+          `DeepSeek answered HTTP ${String(response.status)}; the cover prompt could not be written`,
+          502,
+          { status: response.status, error: body.error?.message },
+        );
+      }
+
+      let content = '';
+      let finishReason: string | null = null;
+      let buffer = '';
+      const decoder = new TextDecoder();
+      for await (const bytes of response.body as AsyncIterable<Uint8Array>) {
+        buffer += decoder.decode(bytes, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          // ": keep-alive" comments and blank separators carry nothing.
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (data === '' || data === '[DONE]') continue;
+          let chunk: StreamChunk;
+          try {
+            chunk = JSON.parse(data) as StreamChunk;
+          } catch {
+            continue;
+          }
+          const choice = chunk.choices?.[0];
+          if (choice?.delta?.content) {
+            clearTimeout(firstTokenTimer);
+            content += choice.delta.content;
+          }
+          if (choice?.finish_reason) finishReason = choice.finish_reason;
+        }
+      }
+      return { content, finishReason };
+    } catch (err) {
+      if (timeout.reason) {
+        throw new AppError(
+          'COVER_AI_BRIEF_TIMEOUT',
+          timeout.reason === 'first_token'
+            ? `DeepSeek did not start answering within ${String(FIRST_TOKEN_TIMEOUT_MS / 1000)}s (it is probably overloaded)`
+            : `DeepSeek did not finish within ${String(TOTAL_TIMEOUT_MS / 1000)}s`,
+          504,
+        );
+      }
+      if (err instanceof AppError) throw err;
+      throw new AppError('COVER_AI_BRIEF_FAILED', 'Could not reach DeepSeek', 502, {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      clearTimeout(firstTokenTimer);
+      clearTimeout(totalTimer);
+    }
+  }
+
+  async write(input: CoverBriefInput): Promise<CoverBrief> {
+    const novel = novelText(input);
+    // JSON mode occasionally answers with empty content (a known DeepSeek issue); one retry covers
+    // it. Timeouts and HTTP errors are not retried: they would only double the wait.
+    let finishReason: string | null = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const result = await this.complete(novel);
+      if (result.finishReason === 'content_filter') {
         throw new AppError(
           'COVER_AI_BRIEF_REFUSED',
-          'The model declined to write a cover brief for this novel; write the prompt by hand',
+          'DeepSeek declined to write a cover prompt for this novel; write the prompt by hand',
           422,
         );
       }
-      const brief = response.ok ? parseBrief(choice?.message?.content) : null;
+      const brief = parseBrief(result.content);
       if (brief) return brief;
-      lastFailure = {
-        status: response.status,
-        finish_reason: choice?.finish_reason,
-        error: body.error?.message,
-      };
-      // Auth, quota and bad-request errors won't fix themselves on a retry.
-      if (response.status >= 400 && response.status < 500 && response.status !== 429) break;
+      finishReason = result.finishReason;
     }
-    throw new AppError(
-      'COVER_AI_BRIEF_FAILED',
-      'The cover brief could not be written',
-      502,
-      lastFailure,
-    );
+    throw new AppError('COVER_AI_BRIEF_FAILED', 'DeepSeek returned no usable cover prompt', 502, {
+      finish_reason: finishReason,
+    });
   }
+}
+
+// Used when DeepSeek is down or slow, so a click still yields covers. It cannot read Vietnamese
+// text into an English scene, so it leans on the genre for style and keeps the subject generic;
+// the admin can always write a better prompt by hand.
+const GENRE_STYLES: { match: RegExp; scene: string; style: string }[] = [
+  {
+    match: /tiên hiệp|tu tiên|huyền huyễn|xianxia|cultivation|kiếm hiệp|võ hiệp|wuxia/iu,
+    scene: 'a lone cultivator in flowing robes on a misty mountain peak above a sea of clouds',
+    style: 'Chinese ink-and-color fantasy painting, jade and gold palette',
+  },
+  {
+    match: /ngôn tình|lãng mạn|romance|tình cảm|đam mỹ|bách hợp/iu,
+    scene: 'a young woman in a sunlit old city street, a quiet moment of longing',
+    style: 'soft cinematic romance illustration, warm pastel light',
+  },
+  {
+    match: /kinh dị|horror|linh dị|ma/iu,
+    scene: 'a dark abandoned house at the end of a foggy road, a single lit window',
+    style: 'dark atmospheric painting, cold desaturated palette, deep shadows',
+  },
+  {
+    match: /trinh thám|hình sự|mystery|detective|thriller/iu,
+    scene: 'a figure in a long coat under a streetlight on a rain-soaked night street',
+    style: 'noir cinematic digital art, teal and amber palette',
+  },
+  {
+    match: /khoa huyễn|khoa học viễn tưởng|sci-?fi|mạt thế|tương lai/iu,
+    scene: 'a lone explorer facing a vast futuristic city skyline under twin moons',
+    style: 'detailed sci-fi concept art, neon blue and violet palette',
+  },
+  {
+    match: /lịch sử|cổ đại|cung đấu|historical|quân sự/iu,
+    scene: 'an ancient palace courtyard at dusk with red lanterns and a solitary figure',
+    style: 'historical epic painting, crimson and gold palette',
+  },
+  {
+    match: /đô thị|hiện đại|urban|học đường|thanh xuân/iu,
+    scene: 'a young person on a rooftop overlooking a glowing modern city at golden hour',
+    style: 'cinematic contemporary digital art, warm golden light',
+  },
+];
+
+export function fallbackBrief(input: CoverBriefInput): CoverBrief {
+  const haystack = [...input.genres, ...input.tags].join(' ');
+  const genre = GENRE_STYLES.find((entry) => entry.match.test(haystack));
+  const scene = genre?.scene ?? 'a solitary figure in an evocative landscape at golden hour';
+  const style =
+    genre?.style ?? 'painterly cinematic book-cover illustration, rich atmospheric light';
+  return {
+    subject: scene,
+    setting: '',
+    mood: 'evocative',
+    palette: '',
+    style,
+    composition: 'subject in the upper two thirds, calm shadowed lower third',
+    prompt: `Book cover illustration: ${scene}. ${style}, highly detailed, dramatic atmospheric lighting, subject in the upper two thirds, calm uncluttered darker lower third, no text, no lettering`,
+  };
 }
 
 let override: CoverBriefWriter | null = null;

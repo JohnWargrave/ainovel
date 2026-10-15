@@ -86,6 +86,8 @@ Cấu trúc theo mẫu catalog/drama: `routes.ts`, `schemas.ts`, `novel.service.
   1. **Brief:** DeepSeek (`COVER_AI_BRIEF_MODEL`, mặc định `deepseek-flash`, API OpenAI-compatible, JSON mode) đọc tên truyện, tác giả, mô tả, thể loại, tags và khoảng 6.000 ký tự đầu của 2 chương đầu, rồi trả về brief JSON tiếng Anh. DeepSeek không có API sinh ảnh nên bước vẽ vẫn dùng Workers AI.
      - Quy tắc: ảnh không có chữ, phong cách theo thể loại, không nội dung nhạy cảm, chừa trống 1/3 dưới cho tiêu đề.
      - Nếu admin tự gõ prompt thì bỏ qua bước này.
+     - Gọi kiểu streaming. Nếu sau 90s DeepSeek vẫn chưa trả token nào, hoặc tổng thời gian quá 180s, thì báo `COVER_AI_BRIEF_TIMEOUT`.
+     - Khi DeepSeek lỗi hoặc timeout, job không fail: hệ thống dùng prompt dựng sẵn theo thể loại (`fallbackBrief`) và ghi lý do vào `errors` để CMS hiển thị.
   2. **Render:** Workers AI FLUX.2 (`COVER_AI_IMAGE_MODEL`, mặc định `@cf/black-forest-labs/flux-2-klein-4b`), gọi REST multipart, khổ 832×1248, 4 seed ngẫu nhiên, gọi tuần tự.
      - Ảnh nào xong thì lưu ngay (`novel_cover_candidates`).
      - Job chỉ `failed` khi cả 4 lần đều lỗi.

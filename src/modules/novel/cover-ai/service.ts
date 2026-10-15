@@ -9,7 +9,13 @@ import { getNovelCoverQueue } from '../../../jobs/novel-cover.js';
 import { insertAudit, setNovelCover, type NovelActor } from '../admin.service.js';
 import type { AdminNovel } from '../admin-schemas.js';
 import { getObjectStorage } from '../storage.js';
-import { EXCERPT_CHARS, getCoverBriefWriter, manualBrief, type CoverBrief } from './brief.js';
+import {
+  EXCERPT_CHARS,
+  fallbackBrief,
+  getCoverBriefWriter,
+  manualBrief,
+  type CoverBrief,
+} from './brief.js';
 import { COVER_HEIGHT, COVER_WIDTH, composeCover } from './compose.js';
 import { getCoverImageGenerator } from './image-generator.js';
 
@@ -163,6 +169,24 @@ function publicMessage(err: unknown, fallback: string): string {
   return err instanceof AppError ? err.message : fallback;
 }
 
+// The LLM brief, or a genre-based one when the LLM is down or slow: an outage should cost prompt
+// quality, not the whole job. The reason goes into the job's errors so the CMS says why.
+async function writeBrief(
+  novel: Awaited<ReturnType<typeof readNovelForBrief>>,
+  errors: string[],
+  logger?: pino.Logger,
+): Promise<CoverBrief> {
+  try {
+    return await getCoverBriefWriter().write(novel);
+  } catch (err) {
+    logger?.warn({ err }, 'cover brief failed; using the genre-based prompt');
+    errors.push(
+      `${publicMessage(err, 'The AI prompt could not be written')}. Used a genre-based prompt instead; edit the image prompt for a closer match.`,
+    );
+    return fallbackBrief(novel);
+  }
+}
+
 export async function processCoverJob(jobId: string, logger?: pino.Logger): Promise<void> {
   const claimed = await db
     .updateTable('novel_cover_jobs')
@@ -179,7 +203,7 @@ export async function processCoverJob(jobId: string, logger?: pino.Logger): Prom
     const novel = await readNovelForBrief(claimed.novel_id);
     const brief = claimed.brief
       ? (claimed.brief as CoverBrief)
-      : await getCoverBriefWriter().write(novel);
+      : await writeBrief(novel, errors, logger);
     await db
       .updateTable('novel_cover_jobs')
       .set({ brief: JSON.stringify(brief), prompt: brief.prompt, model: generator.model })
@@ -221,7 +245,7 @@ export async function processCoverJob(jobId: string, logger?: pino.Logger): Prom
       }
     }
     if (made === 0)
-      throw new AppError('COVER_AI_NO_IMAGES', errors[0] ?? 'No image was generated', 502);
+      throw new AppError('COVER_AI_NO_IMAGES', errors.at(-1) ?? 'No image was generated', 502);
     await db
       .updateTable('novel_cover_jobs')
       .set({ status: 'ready', errors: JSON.stringify(errors), finished_at: new Date() })
