@@ -295,9 +295,11 @@ function scheduleCoverPoll(): void {
   coverPollTimer = window.setTimeout(() => {
     if (!host?.isActive() || ns.novel?.id !== job.novel_id) return;
     void getLatestCoverJob(job.novel_id)
-      .then((next) => {
+      .then(async (next) => {
         if (ns.novel?.id !== job.novel_id) return;
         ns.coverJob = next.job;
+        // The worker applies the image itself; reload so the big cover shows it.
+        if (next.job?.status === 'applied') ns.novel = await getNovel(job.novel_id);
         if (document.activeElement?.id === 'coverPrompt') coverRenderPending = true;
         else rerender();
         scheduleCoverPoll();
@@ -694,9 +696,12 @@ function coverAiPanel(): string {
   const job = ns.coverJob;
   const running = job !== null && IN_FLIGHT_COVER.includes(job.status);
   const prompt = ns.coverPrompt ?? job?.prompt ?? '';
-  const pending = running ? 4 - job.candidates.length : 0;
+  const pending = running ? 1 : 0;
+  // The applied image is already the cover above; only list images still waiting for a pick
+  // (an import draft that found a cover in place, or older multi-candidate jobs).
+  const showCandidates = job !== null && job.candidates.some((candidate) => !candidate.applied_at);
   return `<div class="cover-ai">
-      <button type="button" id="generateCover" ${running ? 'disabled' : ''}>${running ? 'Generating…' : job ? 'Generate 4 more' : 'Generate AI cover'}</button>
+      <button type="button" id="generateCover" ${running ? 'disabled' : ''}>${running ? 'Generating…' : ns.novel?.cover_url ? 'Replace with AI cover' : 'Generate AI cover'}</button>
       <details id="coverPromptDetails" ${ns.coverPromptOpen ? 'open' : ''}>
         <summary>Image prompt</summary>
         <textarea id="coverPrompt" rows="6" maxlength="2000" placeholder="Leave empty and the AI writes one from the description and first chapters.">${escapeHtml(prompt)}</textarea>
@@ -707,7 +712,7 @@ function coverAiPanel(): string {
           ? `<div class="cover-ai-status"><span class="pill import-status-${COVER_STATUS_CLASS[job.status] ?? 'queued'}">${escapeHtml(job.status)}</span>${job.trigger === 'import' ? '<small class="muted">Drafted on import</small>' : ''}</div>
       ${job.errors.length > 0 ? `<small class="cover-ai-error">${escapeHtml(job.errors[0])}${job.errors.length > 1 ? ` (+${String(job.errors.length - 1)})` : ''}</small>` : ''}
       ${
-        job.candidates.length > 0 || pending > 0
+        showCandidates || pending > 0
           ? `<div class="cover-candidates">
         ${job.candidates
           .map(
@@ -968,6 +973,12 @@ function wireNovelDetail(): void {
   document.querySelector<HTMLButtonElement>('#generateCover')?.addEventListener('click', () => {
     // Only a prompt the admin edited is sent; an untouched box means "write me a new one".
     const prompt = ns.coverPrompt?.trim();
+    if (
+      novel.cover_url &&
+      !window.confirm('Generate a new AI cover and replace the current one?')
+    ) {
+      return;
+    }
     void run(async () => {
       ns.coverJob = await createCoverJob(novel.id, prompt);
     }).then(scheduleCoverPoll);

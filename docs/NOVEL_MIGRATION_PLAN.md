@@ -88,17 +88,17 @@ Cấu trúc theo mẫu catalog/drama: `routes.ts`, `schemas.ts`, `novel.service.
      - Nếu admin tự gõ prompt thì bỏ qua bước này.
      - Gọi kiểu streaming. Nếu sau 90s DeepSeek vẫn chưa trả token nào, hoặc tổng thời gian quá 180s, thì báo `COVER_AI_BRIEF_TIMEOUT`.
      - Khi DeepSeek lỗi hoặc timeout, job không fail: hệ thống dùng prompt dựng sẵn theo thể loại (`fallbackBrief`) và ghi lý do vào `errors` để CMS hiển thị.
-  2. **Render:** Workers AI FLUX.2 (`COVER_AI_IMAGE_MODEL`, mặc định `@cf/black-forest-labs/flux-2-klein-4b`), gọi REST multipart, khổ 832×1248, 4 seed ngẫu nhiên, gọi tuần tự.
-     - Ảnh nào xong thì lưu ngay (`novel_cover_candidates`).
-     - Job chỉ `failed` khi cả 4 lần đều lỗi.
+  2. **Render:** Workers AI FLUX.2 (`COVER_AI_IMAGE_MODEL`, mặc định `@cf/black-forest-labs/flux-2-klein-4b`), gọi REST multipart, khổ 832×1248, **chỉ 1 ảnh mỗi job** để tiết kiệm credit.
+     - Lần đầu lỗi thì thử lại 1 lần với seed khác; cả 2 lần lỗi thì job `failed` và bìa giữ nguyên.
   3. **Ghép chữ:** `sharp` thêm dải tối, tên truyện và tác giả bằng font Be Vietnam Pro đi kèm (`assets/fonts/`, để hiện đúng dấu tiếng Việt).
-     - Lưu 2 bản WebP: `covers/candidates/{job}/{i}.webp` có chữ và `{i}-clean.webp` không chữ.
-- Bìa **chỉ đổi khi editor chọn**: candidate được copy sang `covers/{novel}/{uuid}.webp`, sau đó gọi `setNovelCover` và ghi audit `NOVEL_COVER_AI_APPLIED`; bìa cũ bị xoá.
+     - Bản có chữ lưu thẳng vào key cố định `covers/{novel}/{uuid}.webp`; bản không chữ lưu ở `covers/candidates/{job}/0-clean.webp` (sẽ hết hạn).
+- Ảnh **được áp dụng làm bìa ngay** khi render xong (job `applied`, audit `NOVEL_COVER_AI_APPLIED`), bìa cũ bị xoá. Nếu truyện đã có bìa, CMS hỏi xác nhận trước khi thay.
+- Job tạo từ import không bao giờ ghi đè bìa được upload trong lúc đang render: ảnh khi đó được giữ ở trạng thái `ready` để editor tự bấm áp dụng.
 - Mỗi truyện chỉ có 1 job đang chạy (`409 COVER_JOB_IN_PROGRESS`).
   - Job kẹt quá 15 phút được đánh dấu `failed` ở lần tạo job kế tiếp.
   - Giới hạn 30 job/giờ cho mỗi admin.
   - Thiếu `DEEPSEEK_API_KEY` hoặc `CLOUDFLARE_AI_API_TOKEN` thì trả 503 `COVER_AI_NOT_CONFIGURED`.
-- Bật `COVER_AI_AUTO_ON_IMPORT=true` để commit import tự tạo job nháp cho các truyện mới chưa có bìa (EPUB/ZIP có bìa thì bỏ qua).
+- Bật `COVER_AI_AUTO_ON_IMPORT=true` để commit import tự tạo bìa AI cho các truyện mới chưa có bìa (EPUB/ZIP có bìa thì bỏ qua).
 - R2: thêm lifecycle rule xoá prefix `covers/candidates/` sau 7 ngày.
 
 ### Import (`import/`)

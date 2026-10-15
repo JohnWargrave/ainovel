@@ -536,7 +536,8 @@ export function registerNovelAdminRoutes(app: FastifyInstance): void {
   );
 
   // ---- AI covers ----
-  // Four candidates per job, rendered in the worker; the cover only changes on apply.
+  // One render per job in the worker, applied to the novel as soon as it exists. The apply route
+  // re-applies an earlier job's image (or an import draft that did not replace an existing cover).
   app.post<{ Params: IdParams; Body: CreateCoverJobInput }>(
     '/admin/novels/:id/cover-jobs',
     {
@@ -549,7 +550,7 @@ export function registerNovelAdminRoutes(app: FastifyInstance): void {
     },
     async (request, reply) => {
       const actor = requireAdmin(request);
-      // Each job is one LLM call and four paid renders.
+      // Each job is one LLM call and a paid render.
       await checkSubjectRateLimit('cover-ai', actor.id, 3600, 30);
       // Blank after trimming means "let the LLM write it"; createCoverJob treats '' as absent.
       const prompt = request.body.prompt?.trim();

@@ -19,9 +19,10 @@ import {
 import { COVER_HEIGHT, COVER_WIDTH, composeCover } from './compose.js';
 import { getCoverImageGenerator } from './image-generator.js';
 
-export const CANDIDATES_PER_JOB = 4;
+// Renders per job before giving up; only the first success is kept.
+const RENDER_ATTEMPTS = 2;
 // A worker that died mid-job leaves it `generating`, and the one-running-job index would then
-// block the novel for good. Nothing legitimate runs this long (four renders are ~1 minute).
+// block the novel for good. Nothing legitimate runs this long (brief + render is ~1-4 minutes).
 const STALE_JOB_MINUTES = 15;
 
 export interface CoverCandidate {
@@ -210,10 +211,9 @@ export async function processCoverJob(jobId: string, logger?: pino.Logger): Prom
       .where('id', '=', jobId)
       .execute();
 
-    // One at a time, each saved as soon as it exists, so the CMS shows candidates as they land and
-    // one refused or timed-out render costs one slot, not the job.
-    let made = 0;
-    for (let idx = 0; idx < CANDIDATES_PER_JOB; idx += 1) {
+    // One render per job (each costs Workers AI credit); a second seed only if the first fails.
+    let rendered: { seed: number; withText: Buffer; clean: Buffer } | null = null;
+    for (let attempt = 0; attempt < RENDER_ATTEMPTS && !rendered; attempt += 1) {
       const seed = randomInt(0, 2 ** 31);
       try {
         const raw = await generator.generate({
@@ -222,35 +222,86 @@ export async function processCoverJob(jobId: string, logger?: pino.Logger): Prom
           width: COVER_WIDTH,
           height: COVER_HEIGHT,
         });
-        const cover = await composeCover(raw, { title: novel.title, author: novel.author });
-        const imageKey = `covers/candidates/${jobId}/${String(idx)}.webp`;
-        const cleanKey = `covers/candidates/${jobId}/${String(idx)}-clean.webp`;
-        await storage.put(imageKey, cover.withText, 'image/webp');
-        await storage.put(cleanKey, cover.clean, 'image/webp');
-        await db
-          .insertInto('novel_cover_candidates')
-          .values({
-            id: uuidv7(),
-            job_id: jobId,
-            idx,
-            seed,
-            image_key: imageKey,
-            clean_key: cleanKey,
-          })
-          .execute();
-        made += 1;
+        rendered = {
+          seed,
+          ...(await composeCover(raw, { title: novel.title, author: novel.author })),
+        };
       } catch (err) {
-        logger?.warn({ err, jobId, idx }, 'cover candidate failed');
+        logger?.warn({ err, jobId, attempt }, 'cover render failed');
         errors.push(publicMessage(err, 'An image could not be generated'));
       }
     }
-    if (made === 0)
+    if (!rendered) {
       throw new AppError('COVER_AI_NO_IMAGES', errors.at(-1) ?? 'No image was generated', 502);
-    await db
-      .updateTable('novel_cover_jobs')
-      .set({ status: 'ready', errors: JSON.stringify(errors), finished_at: new Date() })
-      .where('id', '=', jobId)
-      .execute();
+    }
+
+    // Written straight to a permanent cover key: the image is applied below, so it must not sit
+    // under covers/candidates/, which the bucket lifecycle empties. The text-free version is only
+    // kept for a re-letter, so it can expire with the candidates.
+    const imageKey = `covers/${claimed.novel_id}/${uuidv7()}.webp`;
+    const cleanKey = `covers/candidates/${jobId}/0-clean.webp`;
+    await storage.put(imageKey, rendered.withText, 'image/webp');
+    await storage.put(cleanKey, rendered.clean, 'image/webp');
+
+    const previousKey = await db.transaction().execute(async (trx) => {
+      const current = await trx
+        .selectFrom('novels')
+        .select('cover_key')
+        .where('id', '=', claimed.novel_id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!current) throw new AppError('NOVEL_NOT_FOUND', 'Novel not found', 404);
+      // An import draft never replaces a cover someone uploaded while it was rendering; the image
+      // stays on the job for an editor to apply by hand.
+      const apply = claimed.trigger === 'manual' || current.cover_key === null;
+      await trx
+        .insertInto('novel_cover_candidates')
+        .values({
+          id: uuidv7(),
+          job_id: jobId,
+          idx: 0,
+          seed: rendered.seed,
+          image_key: imageKey,
+          clean_key: cleanKey,
+          applied_at: apply ? new Date() : null,
+        })
+        .execute();
+      await trx
+        .updateTable('novel_cover_jobs')
+        .set({
+          status: apply ? 'applied' : 'ready',
+          errors: JSON.stringify(errors),
+          finished_at: new Date(),
+        })
+        .where('id', '=', jobId)
+        .execute();
+      if (!apply) return null;
+      await trx
+        .updateTable('novels')
+        .set({
+          cover_url: storage.publicUrl(imageKey),
+          cover_key: imageKey,
+          updated_at: new Date(),
+        })
+        .where('id', '=', claimed.novel_id)
+        .execute();
+      await trx
+        .insertInto('audit_log')
+        .values({
+          id: uuidv7(),
+          admin_user_id: claimed.admin_user_id,
+          action: 'NOVEL_COVER_AI_APPLIED',
+          target_type: 'novel',
+          target_id: claimed.novel_id,
+          detail: JSON.stringify({ job_id: jobId, key: imageKey, trigger: claimed.trigger }),
+          ip: null,
+        })
+        .execute();
+      return current.cover_key;
+    });
+    if (previousKey && previousKey !== imageKey) {
+      storage.delete(previousKey).catch(() => undefined);
+    }
   } catch (err) {
     logger?.error({ err, jobId }, 'cover generation failed');
     await db

@@ -12,7 +12,7 @@ export interface NovelCoverPayload {
 let queue: Queue | null = null;
 
 // Created lazily in the API process (the CMS button and import commit enqueue here); the brief and
-// the four renders run in the worker, about a minute per job.
+// the render run in the worker.
 export function getNovelCoverQueue(): Pick<Queue, 'add'> {
   queue ??= new Queue(QUEUE_NAME, { connection: queueRedis });
   return queue;

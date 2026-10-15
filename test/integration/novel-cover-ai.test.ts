@@ -155,7 +155,17 @@ describe('AI cover generation', () => {
     await app.close();
   });
 
-  it('generates four candidates and applies the one the admin picks', async () => {
+  async function novelCover(
+    novelId: string,
+  ): Promise<{ cover_key: string | null; cover_url: string | null }> {
+    return db
+      .selectFrom('novels')
+      .select(['cover_key', 'cover_url'])
+      .where('id', '=', novelId)
+      .executeTakeFirstOrThrow();
+  }
+
+  it('renders one cover and applies it to the novel', async () => {
     const novelId = await createNovel();
     const created = await startJob(novelId);
     expect(created.statusCode).toBe(202);
@@ -167,78 +177,46 @@ describe('AI cover generation', () => {
     expect(briefs.calls).toHaveLength(1);
     expect(briefs.calls[0]).toMatchObject({ title: 'Kiếm Đạo Độc Tôn', author: 'Tác Giả' });
     expect(briefs.calls[0]?.excerpt).toContain('Lâm Phong');
-    expect(generator.calls.map((call) => [call.width, call.height])).toEqual(
-      Array.from({ length: 4 }, () => [COVER_WIDTH, COVER_HEIGHT]),
-    );
-    expect(new Set(generator.calls.map((call) => call.seed)).size).toBe(4);
+    // One paid render, not four.
+    expect(generator.calls.map((call) => [call.width, call.height])).toEqual([
+      [COVER_WIDTH, COVER_HEIGHT],
+    ]);
 
-    const latest = await app.inject({
-      method: 'GET',
-      url: `/admin/novels/${novelId}/cover-jobs/latest`,
-      headers: adminHeaders(editor, false),
-    });
-    const ready = latest.json<{ job: CoverJobBody }>().job;
-    expect(ready.status).toBe('ready');
-    expect(ready.prompt).toBe(BRIEF.prompt);
-    expect(ready.candidates).toHaveLength(4);
-    const candidateKeys = [...storage.objects.keys()].filter((key) =>
-      key.startsWith(`covers/candidates/${job.id}/`),
-    );
-    expect(candidateKeys).toHaveLength(8);
-
-    // The novel keeps its cover until a pick.
-    const before = await db
-      .selectFrom('novels')
-      .select(['cover_key'])
-      .where('id', '=', novelId)
-      .executeTakeFirstOrThrow();
-    expect(before.cover_key).toBeNull();
-
-    const pick = ready.candidates[2]!;
-    const applied = await app.inject({
-      method: 'POST',
-      url: `/admin/novel-cover-candidates/${pick.id}/apply`,
-      headers: adminHeaders(editor),
-    });
-    expect(applied.statusCode).toBe(200);
-    const novel = await db
-      .selectFrom('novels')
-      .select(['cover_key', 'cover_url'])
-      .where('id', '=', novelId)
-      .executeTakeFirstOrThrow();
-    expect(novel.cover_key?.startsWith(`covers/${novelId}/`)).toBe(true);
-    expect(novel.cover_key?.endsWith('.webp')).toBe(true);
-    expect(novel.cover_url).toBe(`https://storage.invalid/${novel.cover_key ?? ''}`);
-    expect(storage.objects.get(novel.cover_key ?? '')?.body).toEqual(
-      storage.objects.get(`covers/candidates/${job.id}/2.webp`)?.body,
-    );
-
-    const audit = await db
-      .selectFrom('audit_log')
-      .select('action')
-      .where('target_id', '=', novelId)
-      .where('action', '=', 'NOVEL_COVER_AI_APPLIED')
-      .execute();
-    expect(audit).toHaveLength(1);
-
-    const after = (
+    const latest = (
       await app.inject({
         method: 'GET',
         url: `/admin/novels/${novelId}/cover-jobs/latest`,
         headers: adminHeaders(editor, false),
       })
     ).json<{ job: CoverJobBody }>().job;
-    expect(after.status).toBe('applied');
-    expect(after.candidates[2]?.applied_at).not.toBeNull();
+    expect(latest.status).toBe('applied');
+    expect(latest.prompt).toBe(BRIEF.prompt);
+    expect(latest.candidates).toHaveLength(1);
+    expect(latest.candidates[0]?.applied_at).not.toBeNull();
 
-    // Picking another candidate replaces the cover and deletes the one it replaced.
+    // A permanent key, not under covers/candidates/ (which the bucket lifecycle empties).
+    const novel = await novelCover(novelId);
+    expect(novel.cover_key?.startsWith(`covers/${novelId}/`)).toBe(true);
+    expect(novel.cover_key?.endsWith('.webp')).toBe(true);
+    expect(novel.cover_url).toBe(`https://storage.invalid/${novel.cover_key ?? ''}`);
+    expect(storage.objects.has(novel.cover_key ?? '')).toBe(true);
+    expect(storage.objects.has(`covers/candidates/${job.id}/0-clean.webp`)).toBe(true);
+
+    const audit = await db
+      .selectFrom('audit_log')
+      .select(['admin_user_id'])
+      .where('target_id', '=', novelId)
+      .where('action', '=', 'NOVEL_COVER_AI_APPLIED')
+      .execute();
+    expect(audit).toEqual([{ admin_user_id: editor }]);
+
+    // Generating again replaces the cover and deletes the one it replaced.
     const firstKey = novel.cover_key ?? '';
-    await app.inject({
-      method: 'POST',
-      url: `/admin/novel-cover-candidates/${after.candidates[0]!.id}/apply`,
-      headers: adminHeaders(editor),
-    });
+    const second = (await startJob(novelId)).json<CoverJobBody>();
+    await processCoverJob(second.id);
     await new Promise((resolve) => setTimeout(resolve, 10));
+    const after = await novelCover(novelId);
+    expect(after.cover_key).not.toBe(firstKey);
     expect(storage.objects.has(firstKey)).toBe(false);
   });
 
@@ -251,27 +229,23 @@ describe('AI cover generation', () => {
     expect(generator.calls.every((call) => call.prompt === prompt)).toBe(true);
   });
 
-  it('keeps the renders that worked and fails only when none did', async () => {
+  it('tries a second seed when the first render fails, and fails when both do', async () => {
     const novelId = await createNovel();
-    generator.failAt = new Set([1]);
-    const partial = (await startJob(novelId)).json<CoverJobBody>();
-    await processCoverJob(partial.id);
+    generator.failAt = new Set([0]);
+    const retried = (await startJob(novelId)).json<CoverJobBody>();
+    await processCoverJob(retried.id);
     const row = await db
       .selectFrom('novel_cover_jobs')
       .select(['status'])
-      .where('id', '=', partial.id)
+      .where('id', '=', retried.id)
       .executeTakeFirstOrThrow();
-    expect(row.status).toBe('ready');
-    const count = await db
-      .selectFrom('novel_cover_candidates')
-      .select((eb) => eb.fn.countAll<string>().as('n'))
-      .where('job_id', '=', partial.id)
-      .executeTakeFirstOrThrow();
-    expect(Number(count.n)).toBe(3);
+    expect(row.status).toBe('applied');
+    expect(generator.calls).toHaveLength(2);
 
     generator = new FakeGenerator();
-    generator.failAt = new Set([0, 1, 2, 3]);
+    generator.failAt = new Set([0, 1]);
     setCoverImageGenerator(generator);
+    const before = await novelCover(novelId);
     const failed = (await startJob(novelId)).json<CoverJobBody>();
     await processCoverJob(failed.id);
     const failedRow = await db
@@ -282,6 +256,32 @@ describe('AI cover generation', () => {
     expect(failedRow.status).toBe('failed');
     // Internal error text stays in the log.
     expect(failedRow.errors).toEqual(['An image could not be generated']);
+    expect(await novelCover(novelId)).toEqual(before);
+  });
+
+  it('never lets an import draft replace a cover uploaded meanwhile', async () => {
+    const novelId = await createNovel();
+    const jobId = uuidv7();
+    await db
+      .insertInto('novel_cover_jobs')
+      .values({ id: jobId, novel_id: novelId, trigger: 'import' })
+      .execute();
+    await db
+      .updateTable('novels')
+      .set({
+        cover_key: 'covers/uploaded.webp',
+        cover_url: 'https://storage.invalid/covers/uploaded.webp',
+      })
+      .where('id', '=', novelId)
+      .execute();
+    await processCoverJob(jobId);
+    const job = await db
+      .selectFrom('novel_cover_jobs')
+      .select('status')
+      .where('id', '=', jobId)
+      .executeTakeFirstOrThrow();
+    expect(job.status).toBe('ready');
+    expect((await novelCover(novelId)).cover_key).toBe('covers/uploaded.webp');
   });
 
   it('refuses a second job while one is running, and non-editors', async () => {
@@ -529,10 +529,10 @@ describe('DeepSeek brief writer', () => {
       .select(['status', 'errors', 'prompt'])
       .where('id', '=', jobId)
       .executeTakeFirstOrThrow();
-    expect(job.status).toBe('ready');
+    expect(job.status).toBe('applied');
     expect(job.prompt).toContain('no text, no lettering');
     expect((job.errors as string[])[0]).toContain('genre-based prompt');
-    expect(generator.calls).toHaveLength(4);
+    expect(generator.calls).toHaveLength(1);
   });
 
   it('picks the style from the genre', () => {
