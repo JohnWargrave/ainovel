@@ -103,6 +103,8 @@ import {
   listImportJobs,
 } from './import/import.service.js';
 import { exportCatalogCsv, exportNovel, type ExportFile } from './export/export.service.js';
+import { registerNovelGenRoutes } from './generate/routes.js';
+import { registerAiSettingsRoutes } from './ai/routes.js';
 
 // 12-ADMIN-SECURITY.md §RBAC: content is managed by editors; reward economics (region_config) stay
 // superadmin-only like every other region setting; analysts get read-only stats.
@@ -534,6 +536,10 @@ export function registerNovelAdminRoutes(app: FastifyInstance): void {
       reply.send(await cancelImportJob(request.params.id, requireAdmin(request), request.ip));
     },
   );
+
+  // ---- AI novel generation (AI Studio) ----
+  registerNovelGenRoutes(app);
+  registerAiSettingsRoutes(app);
 
   // ---- AI covers ----
   // One render per job in the worker, applied to the novel as soon as it exists. The apply route

@@ -2233,3 +2233,215 @@ img.novel-cover-large {
     white-space: nowrap;
   }
 }
+
+/* ---- AI Studio (novel-gen.ts) ---- */
+
+.gen-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+}
+
+.gen-usage {
+  margin-left: auto;
+}
+
+.gen-errors {
+  margin: var(--space-sm) 0 0;
+  padding-left: var(--space-md);
+  color: var(--color-error-text);
+}
+
+.gen-idea {
+  margin-top: var(--space-sm);
+}
+
+.gen-idea summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+
+.gen-idea p {
+  white-space: pre-wrap;
+}
+
+.gen-waiting {
+  border-left: 3px solid var(--color-primary);
+}
+
+.gen-characters,
+.gen-arcs,
+.gen-outline {
+  display: grid;
+  gap: var(--space-sm);
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.gen-characters {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  align-items: start;
+}
+
+.gen-character {
+  display: grid;
+  gap: var(--space-xs);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-lg);
+  padding: var(--space-sm);
+  background: var(--color-fill-alter);
+}
+
+.gen-character-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: var(--space-xs);
+  align-items: end;
+}
+
+.gen-arc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-xs);
+  align-items: center;
+}
+
+.gen-arc textarea {
+  grid-column: 1 / -1;
+}
+
+.gen-arc-range {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-xs);
+  white-space: nowrap;
+}
+
+.gen-arc-range input {
+  width: 5.5rem;
+}
+
+.gen-outline table td {
+  vertical-align: top;
+}
+
+.gen-outline-cell {
+  display: grid;
+  gap: var(--space-xs);
+  min-width: 320px;
+}
+
+.gen-outline-cell input {
+  font-weight: 600;
+}
+
+.gen-row-actions {
+  white-space: nowrap;
+}
+
+.gen-row-busy {
+  background: var(--color-primary-bg);
+}
+
+.gen-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: var(--space);
+}
+
+.gen-chip {
+  min-width: 2.25rem;
+  padding: 2px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.gen-chip-written {
+  border-color: var(--color-success-border);
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.gen-chip-live {
+  border-color: var(--color-primary);
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+  animation: gen-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes gen-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gen-chip-live {
+    animation: none;
+  }
+}
+
+.gen-live {
+  max-height: 480px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space);
+  border-radius: var(--radius-lg);
+  background: var(--color-fill-alter);
+  font-family: inherit;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- AI settings panel (ai-settings.ts) ---- */
+
+.ai-settings > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs) var(--space-sm);
+  cursor: pointer;
+}
+
+.ai-settings[open] > summary {
+  margin-bottom: var(--space);
+}
+
+.ai-settings-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+.ai-settings h4 {
+  margin: var(--space-lg) 0 var(--space-xs);
+}
+
+.ai-settings-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-sm);
+  align-items: baseline;
+}
+
+.ai-check-ok {
+  color: var(--color-success-text);
+}
+
+.ai-models input {
+  width: 100%;
+  min-width: 9rem;
+}
+
+.ai-models .ai-price {
+  min-width: 6rem;
+  text-align: right;
+}

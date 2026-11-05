@@ -62,6 +62,9 @@ const EnvSchema = Type.Object({
   DEEPSEEK_BASE_URL: Type.String({ default: 'https://api.deepseek.com' }),
   COVER_AI_IMAGE_MODEL: Type.String({ default: '@cf/black-forest-labs/flux-2-klein-4b' }),
   COVER_AI_BRIEF_MODEL: Type.String({ default: 'deepseek-flash' }),
+  // AI novel generation (CMS "AI Studio"). Uses DEEPSEEK_API_KEY; without it the feature answers 503
+  // NOVEL_GEN_NOT_CONFIGURED. The model defaults to COVER_AI_BRIEF_MODEL when unset.
+  NOVEL_GEN_MODEL: Type.Optional(Type.String()),
   // Draft covers for imported novels that arrive without one (they still wait for an admin pick).
   COVER_AI_AUTO_ON_IMPORT: Type.Boolean({ default: false }),
   // Base of the invite link GET /referral hands the app to share (the code is appended as /{code}).
@@ -127,6 +130,7 @@ export function loadEnv(source: NodeJS.ProcessEnv): Env {
     COVER_AI_IMAGE_MODEL: source['COVER_AI_IMAGE_MODEL'],
     COVER_AI_BRIEF_MODEL: source['COVER_AI_BRIEF_MODEL'],
     COVER_AI_AUTO_ON_IMPORT: source['COVER_AI_AUTO_ON_IMPORT'] === 'true',
+    NOVEL_GEN_MODEL: source['NOVEL_GEN_MODEL'],
     S3_PUBLIC_BASE_URL: source['S3_PUBLIC_BASE_URL'],
     REFERRAL_SHARE_BASE_URL: source['REFERRAL_SHARE_BASE_URL'],
     NOVEL_SHARE_BASE_URL: source['NOVEL_SHARE_BASE_URL'],

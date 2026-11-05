@@ -14,6 +14,7 @@ import { createPostbackFraudHookWorker } from './postback-fraud-hook.js';
 import { createReferralCreditWorker } from './referral-credit.js';
 import { createNovelImportWorker } from './novel-import.js';
 import { createNovelCoverWorker } from './novel-cover.js';
+import { createNovelGenWorker } from './novel-generate.js';
 import {
   createCatalogCrawlerQueue,
   createCatalogCrawlerWorker,
@@ -48,6 +49,9 @@ export async function registerJobs(logger: pino.Logger): Promise<Worker[]> {
   // Event-driven (enqueued by the CMS "Generate AI cover" button and by import commits).
   const novelCoverWorker = createNovelCoverWorker(logger);
 
+  // Event-driven (enqueued by the CMS AI Studio; a writing run re-enqueues itself per chapter).
+  const novelGenWorker = createNovelGenWorker(logger);
+
   const catalogCrawlerQueue = createCatalogCrawlerQueue();
   await scheduleCatalogCrawlerRepeat(catalogCrawlerQueue);
   // Default source is noopCatalogSource until SeaGM ToS/reseller channel is confirmed — see
@@ -65,6 +69,7 @@ export async function registerJobs(logger: pino.Logger): Promise<Worker[]> {
     referralCreditWorker,
     novelImportWorker,
     novelCoverWorker,
+    novelGenWorker,
     catalogCrawlerWorker,
     economyBackingAlertWorker,
   ];

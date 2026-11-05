@@ -18,6 +18,7 @@ import {
 } from './brief.js';
 import { COVER_HEIGHT, COVER_WIDTH, composeCover } from './compose.js';
 import { getCoverImageGenerator } from './image-generator.js';
+import { loadAiSettings } from '../ai/settings.js';
 
 // Renders per job before giving up; only the first success is kept.
 const RENDER_ATTEMPTS = 2;
@@ -74,10 +75,12 @@ async function failStaleJobs(novelId: string): Promise<void> {
 export async function createCoverJob(
   novelId: string,
   actor: NovelActor | null,
-  trigger: 'manual' | 'import',
+  // 'generate' is a draft for an AI-generated novel; like 'import' it never replaces a cover.
+  trigger: 'manual' | 'import' | 'generate',
   typedPrompt?: string,
 ): Promise<CoverJob> {
   const prompt = typedPrompt?.trim() === '' ? undefined : typedPrompt?.trim();
+  await loadAiSettings();
   // Fail here, in the request, rather than in the worker after the admin has started waiting.
   getCoverImageGenerator();
   if (!prompt) getCoverBriefWriter();
@@ -197,6 +200,7 @@ export async function processCoverJob(jobId: string, logger?: pino.Logger): Prom
     .returningAll()
     .executeTakeFirst();
   if (!claimed) return;
+  await loadAiSettings();
   const errors: string[] = [];
   try {
     const generator = getCoverImageGenerator();
@@ -251,7 +255,7 @@ export async function processCoverJob(jobId: string, logger?: pino.Logger): Prom
         .forUpdate()
         .executeTakeFirst();
       if (!current) throw new AppError('NOVEL_NOT_FOUND', 'Novel not found', 404);
-      // An import draft never replaces a cover someone uploaded while it was rendering; the image
+      // An import or generate draft never replaces a cover someone uploaded while it was rendering; the image
       // stays on the job for an editor to apply by hand.
       const apply = claimed.trigger === 'manual' || current.cover_key === null;
       await trx
@@ -444,7 +448,9 @@ export async function draftCoversForImport(
   novelIds: string[],
   logger?: pino.Logger,
 ): Promise<void> {
-  if (!env.COVER_AI_AUTO_ON_IMPORT || novelIds.length === 0 || !isCoverAiConfigured()) return;
+  if (!env.COVER_AI_AUTO_ON_IMPORT || novelIds.length === 0) return;
+  await loadAiSettings();
+  if (!isCoverAiConfigured()) return;
   const bare = await db
     .selectFrom('novels')
     .select('id')

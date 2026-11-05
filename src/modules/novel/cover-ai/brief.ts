@@ -1,5 +1,6 @@
-import { env } from '../../../config/env.js';
 import { AppError } from '../../../lib/errors.js';
+import { streamDeepSeekChat, type ChatResult } from '../ai/deepseek-chat.js';
+import { aiConfig } from '../ai/settings.js';
 
 // What the art director step (DeepSeek) hands the image model. English, because FLUX follows English prompts
 // far better than Vietnamese; `prompt` is the only field FLUX sees, the rest is for the admin
@@ -53,21 +54,9 @@ Answer with a single JSON object and nothing else, every value an English string
 // Enough of the opening to find the protagonist and the first set piece; covers don't need more.
 export const EXCERPT_CHARS = 6000;
 
-// Streamed so a model that is merely slow (it sends `: keep-alive` lines while queued) can be told
-// apart from one that is down, and so the wait is bounded by our clock rather than DeepSeek's.
 // Under load DeepSeek has been seen holding requests for minutes before the first token.
 const FIRST_TOKEN_TIMEOUT_MS = 90_000;
 const TOTAL_TIMEOUT_MS = 180_000;
-
-interface StreamChunk {
-  choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[];
-  error?: { message?: string };
-}
-
-interface StreamResult {
-  content: string;
-  finishReason: string | null;
-}
 
 function parseBrief(content: string | null | undefined): CoverBrief | null {
   if (!content) return null;
@@ -98,107 +87,27 @@ function novelText(input: CoverBriefInput): string {
     .join('\n\n');
 }
 
-// DeepSeek's OpenAI-compatible chat API in JSON mode, streamed. Thinking is off: the brief is a
-// short creative rewrite, and reasoning would only add latency and tokens.
+// DeepSeek in JSON mode, streamed (see deepseek-chat.ts).
+// Key, host and model come from the AI settings (CMS, else environment) at call time, so a key
+// saved in the CMS applies without a restart.
 class DeepSeekCoverBriefWriter implements CoverBriefWriter {
-  constructor(private readonly apiKey: string) {}
-
-  private async complete(novel: string): Promise<StreamResult> {
-    const controller = new AbortController();
-    // An object, not a `let`: TypeScript can't see the timer callbacks assign it.
-    const timeout: { reason: 'first_token' | 'total' | null } = { reason: null };
-    const abort = (reason: 'first_token' | 'total'): void => {
-      timeout.reason = reason;
-      controller.abort();
-    };
-    const firstTokenTimer = setTimeout(() => {
-      abort('first_token');
-    }, FIRST_TOKEN_TIMEOUT_MS);
-    const totalTimer = setTimeout(() => {
-      abort('total');
-    }, TOTAL_TIMEOUT_MS);
-    try {
-      const response = await fetch(
-        `${env.DEEPSEEK_BASE_URL.replace(/\/+$/u, '')}/chat/completions`,
-        {
-          method: 'POST',
-          headers: {
-            authorization: `Bearer ${this.apiKey}`,
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: env.COVER_AI_BRIEF_MODEL,
-            stream: true,
-            thinking: { type: 'disabled' },
-            response_format: { type: 'json_object' },
-            max_tokens: 1500,
-            messages: [
-              { role: 'system', content: SYSTEM },
-              {
-                role: 'user',
-                content: `<novel>\n${novel}\n</novel>\n\nReturn the cover brief as JSON.`,
-              },
-            ],
-          }),
-          signal: controller.signal,
-        },
-      );
-      if (!response.ok || !response.body) {
-        const body = (await response.json().catch(() => ({}))) as StreamChunk;
-        throw new AppError(
-          'COVER_AI_BRIEF_FAILED',
-          `DeepSeek answered HTTP ${String(response.status)}; the cover prompt could not be written`,
-          502,
-          { status: response.status, error: body.error?.message },
-        );
-      }
-
-      let content = '';
-      let finishReason: string | null = null;
-      let buffer = '';
-      const decoder = new TextDecoder();
-      for await (const bytes of response.body as AsyncIterable<Uint8Array>) {
-        buffer += decoder.decode(bytes, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          // ": keep-alive" comments and blank separators carry nothing.
-          if (!line.startsWith('data:')) continue;
-          const data = line.slice(5).trim();
-          if (data === '' || data === '[DONE]') continue;
-          let chunk: StreamChunk;
-          try {
-            chunk = JSON.parse(data) as StreamChunk;
-          } catch {
-            continue;
-          }
-          const choice = chunk.choices?.[0];
-          if (choice?.delta?.content) {
-            clearTimeout(firstTokenTimer);
-            content += choice.delta.content;
-          }
-          if (choice?.finish_reason) finishReason = choice.finish_reason;
-        }
-      }
-      return { content, finishReason };
-    } catch (err) {
-      if (timeout.reason) {
-        throw new AppError(
-          'COVER_AI_BRIEF_TIMEOUT',
-          timeout.reason === 'first_token'
-            ? `DeepSeek did not start answering within ${String(FIRST_TOKEN_TIMEOUT_MS / 1000)}s (it is probably overloaded)`
-            : `DeepSeek did not finish within ${String(TOTAL_TIMEOUT_MS / 1000)}s`,
-          504,
-        );
-      }
-      if (err instanceof AppError) throw err;
-      throw new AppError('COVER_AI_BRIEF_FAILED', 'Could not reach DeepSeek', 502, {
-        message: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      clearTimeout(firstTokenTimer);
-      clearTimeout(totalTimer);
+  private complete(novel: string): Promise<ChatResult> {
+    const config = aiConfig();
+    if (!config.apiKey) {
+      throw new AppError('COVER_AI_NOT_CONFIGURED', 'AI cover generation is not configured', 503);
     }
+    return streamDeepSeekChat(config.apiKey, {
+      model: config.coverModel,
+      baseUrl: config.baseUrl,
+      json: true,
+      maxTokens: 1500,
+      system: SYSTEM,
+      user: `<novel>\n${novel}\n</novel>\n\nReturn the cover brief as JSON.`,
+      firstTokenTimeoutMs: FIRST_TOKEN_TIMEOUT_MS,
+      totalTimeoutMs: TOTAL_TIMEOUT_MS,
+      errorCode: 'COVER_AI_BRIEF',
+      failure: 'the cover prompt could not be written',
+    });
   }
 
   async write(input: CoverBriefInput): Promise<CoverBrief> {
@@ -284,7 +193,7 @@ export function fallbackBrief(input: CoverBriefInput): CoverBrief {
 }
 
 let override: CoverBriefWriter | null = null;
-let configured: CoverBriefWriter | null = null;
+const configured = new DeepSeekCoverBriefWriter();
 
 export function setCoverBriefWriter(writer: CoverBriefWriter | null): void {
   override = writer;
@@ -292,10 +201,9 @@ export function setCoverBriefWriter(writer: CoverBriefWriter | null): void {
 
 export function getCoverBriefWriter(): CoverBriefWriter {
   if (override) return override;
-  if (!env.DEEPSEEK_API_KEY) {
+  if (!aiConfig().apiKey) {
     throw new AppError('COVER_AI_NOT_CONFIGURED', 'AI cover generation is not configured', 503);
   }
-  configured ??= new DeepSeekCoverBriefWriter(env.DEEPSEEK_API_KEY);
   return configured;
 }
 

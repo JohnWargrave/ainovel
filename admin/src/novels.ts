@@ -55,6 +55,7 @@ import {
   type NovelStats,
   type TopNovels,
 } from './novels-api.js';
+import { loadStudio, resetStudio, studioView, wireStudio, type StudioHost } from './novel-gen.js';
 import {
   errorMessage,
   escapeHtml,
@@ -75,7 +76,7 @@ export interface NovelsHost {
   role(): string | undefined;
 }
 
-type NovelsTab = 'novels' | 'imports' | 'categories' | 'stats';
+type NovelsTab = 'novels' | 'imports' | 'studio' | 'categories' | 'stats';
 
 interface NovelsState {
   tab: NovelsTab;
@@ -181,6 +182,7 @@ const BULK_CHAPTER_ACTIONS: Array<[BulkChapterActionName, string]> = [
 export function resetNovelsState(): void {
   window.clearTimeout(pollTimer);
   window.clearTimeout(coverPollTimer);
+  resetStudio();
   ns = initialState();
 }
 
@@ -350,7 +352,12 @@ export function renderNovelsPage(nextHost: NovelsHost): void {
   host = nextHost;
   const tabs: Array<[NovelsTab, string]> = [
     ['novels', 'Novels'],
-    ...(canEdit() ? ([['imports', 'Import']] as Array<[NovelsTab, string]>) : []),
+    ...(canEdit()
+      ? ([
+          ['imports', 'Import'],
+          ['studio', 'AI Studio'],
+        ] as Array<[NovelsTab, string]>)
+      : []),
     ['categories', 'Categories'],
     ['stats', 'Top novels'],
   ];
@@ -361,6 +368,7 @@ export function renderNovelsPage(nextHost: NovelsHost): void {
     else body = novelList();
   }
   if (ns.tab === 'imports') body = ns.importJob ? importJobView(ns.importJob) : importsView();
+  if (ns.tab === 'studio') body = studioView();
   if (ns.tab === 'categories') body = categoriesView();
   if (ns.tab === 'stats') body = topView();
 
@@ -392,9 +400,23 @@ export function renderNovelsPage(nextHost: NovelsHost): void {
     else wireImports();
     schedulePoll();
   }
+  if (ns.tab === 'studio') wireStudio(studioHost);
   if (ns.tab === 'categories') wireCategories();
   if (ns.tab === 'stats') wireTop();
 }
+
+const studioHost: StudioHost = {
+  run,
+  rerender,
+  setError: (message) => host?.setStatus({ error: message }),
+  isActive: () => Boolean(host?.isActive()) && ns.tab === 'studio',
+  categories: () => ns.categories ?? [],
+  openNovel: (novelId) => {
+    ns.tab = 'novels';
+    void openNovel(novelId);
+  },
+  role: () => host?.role(),
+};
 
 function wireTabs(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-novels-tab]').forEach((button) => {
@@ -406,6 +428,10 @@ function wireTabs(): void {
         void run(async () => {
           ns.imports = (await listImportJobs()).items;
         });
+        return;
+      }
+      if (tab === 'studio') {
+        void run(ensureCategories).then(() => loadStudio(studioHost));
         return;
       }
       if (tab === 'categories') {

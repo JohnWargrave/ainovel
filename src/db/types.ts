@@ -589,7 +589,7 @@ interface NovelCoverJobsTable {
   id: string;
   novel_id: string;
   status: Generated<NovelCoverJobStatus>;
-  trigger: 'manual' | 'import';
+  trigger: 'manual' | 'import' | 'generate';
   brief: unknown;
   prompt: string | null;
   model: string | null;
@@ -608,6 +608,49 @@ interface NovelCoverCandidatesTable {
   clean_key: string;
   created_at: GeneratedTimestamp;
   applied_at: Timestamp | null;
+}
+
+export type NovelGenStatus = 'queued' | 'running' | 'idle' | 'paused' | 'failed';
+export type NovelGenTask = 'bible' | 'outline' | 'outline_chapter' | 'chapters';
+
+interface NovelGenProjectsTable {
+  id: string;
+  novel_id: string | null;
+  status: Generated<NovelGenStatus>;
+  task: NovelGenTask;
+  run_id: string;
+  input: unknown;
+  bible: unknown;
+  outline: unknown;
+  task_note: string | null;
+  task_chapter_no: number | null;
+  write_from: number | null;
+  write_to: number | null;
+  write_next: number | null;
+  write_overwrite: Generated<boolean>;
+  progress: string | null;
+  live_chapter_no: number | null;
+  live_text: string | null;
+  model: string | null;
+  prompt_tokens: GeneratedBigint;
+  completion_tokens: GeneratedBigint;
+  cost_usd: GeneratedNumeric;
+  errors: Generated<unknown>;
+  admin_user_id: string | null;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+interface AiSettingsTable {
+  id: Generated<number>;
+  deepseek_api_key: string | null;
+  key_hint: string | null;
+  deepseek_base_url: string | null;
+  novel_model: string | null;
+  cover_model: string | null;
+  models: Generated<unknown>;
+  updated_by: string | null;
+  updated_at: GeneratedTimestamp;
 }
 
 interface SpinConfigTable {
@@ -712,6 +755,8 @@ export interface DB {
   novel_import_chapters: NovelImportChaptersTable;
   novel_cover_jobs: NovelCoverJobsTable;
   novel_cover_candidates: NovelCoverCandidatesTable;
+  novel_gen_projects: NovelGenProjectsTable;
+  ai_settings: AiSettingsTable;
   spin_config: SpinConfigTable;
   spin_history: SpinHistoryTable;
   user_boosts: UserBoostsTable;

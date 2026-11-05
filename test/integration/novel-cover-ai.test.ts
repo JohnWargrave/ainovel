@@ -24,6 +24,7 @@ import {
   composeCover,
 } from '../../src/modules/novel/cover-ai/compose.js';
 import { processCoverJob } from '../../src/modules/novel/cover-ai/service.js';
+import { resetAiSettingsCache } from '../../src/modules/novel/ai/settings.js';
 import { processImportJob } from '../../src/modules/novel/import/import.service.js';
 
 const ADMIN_API_KEY = 'test-admin-api-key';
@@ -418,6 +419,8 @@ describe('DeepSeek brief writer', () => {
   beforeAll(() => {
     env.DEEPSEEK_API_KEY = 'test-deepseek-key';
     setCoverBriefWriter(null);
+    // Environment only: another test file may have saved CMS settings meanwhile.
+    resetAiSettingsCache();
   });
   afterEach(() => {
     vi.unstubAllGlobals();

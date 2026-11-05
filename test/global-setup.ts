@@ -35,6 +35,7 @@ const DATA_TABLES = [
   'audit_log',
   'inbox_messages',
   'catalog_staging',
+  'novel_gen_projects',
   'novel_cover_candidates',
   'novel_cover_jobs',
   'novel_import_chapters',
@@ -61,6 +62,11 @@ export async function setup(): Promise<void> {
     // One statement so FK ordering never matters. CASCADE is safe here because every dependent table
     // is already in the list — nothing outside it references these rows.
     await pool.query(`TRUNCATE ${DATA_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+    // AI settings are a config row, not appended data: put it back to "use the environment".
+    await pool.query(
+      `UPDATE ai_settings SET deepseek_api_key = NULL, key_hint = NULL, deepseek_base_url = NULL,
+         novel_model = NULL, cover_model = NULL, models = '[]'::jsonb, updated_by = NULL`,
+    );
   } finally {
     await pool.end();
   }
